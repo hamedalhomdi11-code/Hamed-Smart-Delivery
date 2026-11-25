@@ -41,6 +41,9 @@ jobs:
           python database/sync_riyadh_overture.py \
             data/output/hamed_smart_delivery_riyadh.sqlite \
             data/source/overture-riyadh-places.parquet | tee data/output/overture_sync.report.json
+      - name: Import additional Wikidata points of interest
+        run: |
+          python database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riyadh.sqlite | tee data/output/wikidata_sync.report.json
       - name: Download and extract current OpenStreetMap GCC data
         run: |
           curl -L --fail --retry 5 --retry-all-errors \
