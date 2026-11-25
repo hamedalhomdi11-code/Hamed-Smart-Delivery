@@ -6,6 +6,7 @@ import android.content.Intent
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.graphics.Color as AndroidColor
 import android.os.Looper
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -24,6 +25,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +45,7 @@ import androidx.core.content.ContextCompat
 import org.maplibre.android.MapLibre
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.PolylineOptions
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -57,12 +62,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
-        setContent { HamedApp() }
+        val sharedText = intent?.getStringExtra(Intent.EXTRA_TEXT) ?: intent?.dataString
+        setContent { HamedApp(DestinationLinkParser.parse(sharedText)) }
     }
 }
 
 @Composable
-fun HamedApp() {
+fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     var searching by remember { mutableStateOf(false) }
     var hasOrder by remember { mutableStateOf(false) }
@@ -91,7 +97,7 @@ fun HamedApp() {
             Column(Modifier.fillMaxSize().background(Night)) {
                 Header(title, english) { english = !english }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    SmartMap(hasLocationPermission)
+                    SmartMap(hasLocationPermission, initialDestination)
                     Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                         MiniMetric(if (english) "Map" else "الخريطة", "OpenStreetMap", Icons.Rounded.Map)
@@ -152,11 +158,14 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
+    var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
+    var routeRequested by remember(destination) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
     }
@@ -185,10 +194,13 @@ private fun SmartMap(hasLocationPermission: Boolean) {
                 map.uiSettings.isAttributionEnabled = true
                 map.uiSettings.isLogoEnabled = true
                 map.cameraPosition = CameraPosition.Builder()
-                    .target(LatLng(24.7136, 46.6753))
-                    .zoom(13.5)
+                    .target(destination?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(24.7136, 46.6753))
+                    .zoom(if (destination == null) 13.5 else 15.0)
                     .tilt(50.0)
                     .build()
+                if (destination != null) {
+                    map.addMarker(MarkerOptions().position(LatLng(destination.latitude, destination.longitude)).title("وجهة التوصيل"))
+                }
             }
         }
     }
@@ -211,12 +223,33 @@ private fun SmartMap(hasLocationPermission: Boolean) {
                     }
                     if (firstFix) {
                         firstFix = false
-                        map.animateCamera(
-                            CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(point).zoom(16.0).tilt(50.0).build()
-                            ),
-                            700
-                        )
+                        if (destination == null) {
+                            map.animateCamera(
+                                CameraUpdateFactory.newCameraPosition(
+                                    CameraPosition.Builder().target(point).zoom(16.0).tilt(50.0).build()
+                                ),
+                                700
+                            )
+                        }
+                    }
+                    if (destination != null && !routeRequested) {
+                        routeRequested = true
+                        routeStatus = "جارٍ حساب المسار"
+                        scope.launch {
+                            val route = withContext(Dispatchers.IO) {
+                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
+                            }
+                            if (route != null && route.points.size > 1) {
+                                map.addPolyline(
+                                    PolylineOptions().addAll(route.points)
+                                        .color(AndroidColor.rgb(94, 240, 194))
+                                        .width(6f)
+                                )
+                                routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم"
+                            } else {
+                                routeStatus = "تعذر حساب المسار حالياً"
+                            }
+                        }
                     }
                 }
             }
@@ -234,11 +267,22 @@ private fun SmartMap(hasLocationPermission: Boolean) {
         }
     }
 
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { mapView },
-        update = { }
-    )
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { mapView },
+            update = { }
+        )
+        if (routeStatus.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                color = Panel.copy(alpha = .94f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(routeStatus, color = Mint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+            }
+        }
+    }
 }
 
 @Composable
