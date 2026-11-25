@@ -32,13 +32,13 @@ class LocationTrackingService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
-        startForeground(NOTIFICATION_ID, buildNotification("GPS session starting"))
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!fine && !coarse) {
             stopSelf()
             return START_NOT_STICKY
         }
+        startForeground(NOTIFICATION_ID, buildNotification("GPS session starting"))
         try {
             val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
             locationManager.requestLocationUpdates(provider, 3000L, 5f, this, Looper.getMainLooper())
