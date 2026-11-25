@@ -8,7 +8,8 @@ import java.net.URL
 data class RouteStep(
     val instruction: String,
     val distanceMeters: Double,
-    val durationSeconds: Double
+    val durationSeconds: Double,
+    val location: LatLng?
 )
 
 data class RouteResult(
@@ -59,8 +60,11 @@ object OsrmRouteClient {
                         val modifier = maneuver?.optString("modifier").orEmpty()
                         val road = step.optString("name").takeIf { it.isNotBlank() }
                         val instruction = formatInstruction(type, modifier, road)
+                        val coordinate = maneuver?.optJSONArray("location")
+                        val point = if (coordinate != null && coordinate.length() >= 2)
+                            LatLng(coordinate.getDouble(1), coordinate.getDouble(0)) else null
                         if (instruction.isNotBlank()) add(
-                            RouteStep(instruction, step.optDouble("distance", 0.0), step.optDouble("duration", 0.0))
+                            RouteStep(instruction, step.optDouble("distance", 0.0), step.optDouble("duration", 0.0), point)
                         )
                     }
                 }
@@ -83,7 +87,7 @@ object OsrmRouteClient {
             "left", "sharp left", "slight left" -> "انعطف يساراً"
             "right", "sharp right", "slight right" -> "انعطف يميناً"
             "uturn" -> "قم بالدوران للخلف"
-            "straight" -> "واصل straight"
+            "straight" -> "واصل السير للأمام"
             else -> when (type) {
                 "depart" -> "ابدأ السير"
                 "arrive" -> "وصلت إلى وجهتك"
