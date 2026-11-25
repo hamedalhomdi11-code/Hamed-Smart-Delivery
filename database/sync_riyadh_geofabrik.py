@@ -49,11 +49,11 @@ def main():
       VALUES (?,?,?,?,?,?)""",
       (SOURCE_ID, "OpenStreetMap Geofabrik GCC extract (Riyadh clip)", "open_map",
        SOURCE_URL, "Open Database License (ODbL) 1.0", USER_AGENT_NOTE))
-    inserted = updated = skipped = 0
+    inserted = updated = skipped = 0\n    skip_reasons = {"no_name": 0, "no_geometry": 0, "bad_geometry": 0, "outside_bbox": 0, "no_osm_id": 0}
     for feature in data.get("features", []):
         props = feature.get("properties") or {}
         tags = {str(k): str(v) for k, v in props.items() if not str(k).startswith("@") and v is not None}
-        name = (tags.get("name") or tags.get("name:ar") or tags.get("brand") or "").strip()
+        name = (tags.get("name") or tags.get("name:ar") or tags.get("name:en") or tags.get("official_name") or tags.get("brand") or tags.get("brand:en") or tags.get("brand:ar") or tags.get("operator") or "").strip()
         if not name:
             skipped += 1
             continue
