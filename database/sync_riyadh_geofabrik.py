@@ -49,18 +49,21 @@ def main():
       VALUES (?,?,?,?,?,?)""",
       (SOURCE_ID, "OpenStreetMap Geofabrik GCC extract (Riyadh clip)", "open_map",
        SOURCE_URL, "Open Database License (ODbL) 1.0", USER_AGENT_NOTE))
-    inserted = updated = skipped = 0\n    skip_reasons = {"no_name": 0, "no_geometry": 0, "bad_geometry": 0, "outside_bbox": 0, "no_osm_id": 0}
+    inserted = updated = skipped = 0
+    skip_reasons = {"no_name": 0, "no_geometry": 0, "bad_geometry": 0, "outside_bbox": 0, "no_osm_id": 0}
     for feature in data.get("features", []):
         props = feature.get("properties") or {}
         tags = {str(k): str(v) for k, v in props.items() if not str(k).startswith("@") and v is not None}
         name = (tags.get("name") or tags.get("name:ar") or tags.get("name:en") or tags.get("official_name") or tags.get("brand") or tags.get("brand:en") or tags.get("brand:ar") or tags.get("operator") or "").strip()
         if not name:
             skipped += 1
+            skip_reasons["no_name"] += 1
             continue
         geom = feature.get("geometry") or {}
         coords = geom.get("coordinates")
         if not coords:
             skipped += 1
+            skip_reasons["no_geometry"] += 1
             continue
         try:
             # GeoJSON geometry from osmium export; compute a representative point.
@@ -69,15 +72,18 @@ def main():
             lon, lat = float(point.x), float(point.y)
         except Exception:
             skipped += 1
+            skip_reasons["bad_geometry"] += 1
             continue
         if not (24.05 <= lat <= 25.15 and 46.20 <= lon <= 47.35):
             skipped += 1
+            skip_reasons["outside_bbox"] += 1
             continue
         osm_identity = feature.get("id") or props.get("@id")
         if not osm_identity:
             osm_identity = props.get("osm_id") or props.get("id")
         if not osm_identity:
             skipped += 1
+            skip_reasons["no_osm_id"] += 1
             continue
         osm_identity = str(osm_identity)
         if "/" not in osm_identity:
@@ -119,6 +125,7 @@ def main():
         "geojson_features_received": len(data.get("features", [])),
         "inserted_or_updated": inserted,
         "skipped": skipped,
+        "skip_reasons": skip_reasons,
         "geofabrik_source_records_active": source_total,
         "active_riyadh_places_total": total,
         "source": "OpenStreetMap / Geofabrik GCC extract",
