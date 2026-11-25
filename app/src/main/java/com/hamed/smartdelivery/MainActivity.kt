@@ -30,6 +30,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -140,7 +143,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING)
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -221,7 +224,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -294,7 +297,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, activeDestination, trackingActive, perspective3D, searchRequestId) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, perspective3D, searchRequestId, searchActive) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
@@ -304,6 +307,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var lastCameraLocation: Location? = null
             var lastRerouteAt = 0L
             var routePolyline: org.maplibre.android.annotations.Polyline? = null
+            var discoveryJob: Job? = null
+            var routeJob: Job? = null
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
@@ -329,28 +334,73 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         )
                         lastCameraLocation = Location(location)
                     }
-                    if (searchRequestId > lastProcessedSearch) {
+                    if (searchActive && searchRequestId > lastProcessedSearch) {
                         lastProcessedSearch = searchRequestId
-                        routeStatus = "جارٍ البحث الحي عن تجمعات المطاعم حولك"
-                        scope.launch {
-                            try {
-                                val clusters = withContext(Dispatchers.IO) {
-                                    RestaurantDiscoveryClient.findNearestClusters(location.latitude, location.longitude)
-                                }
-                                val best = clusters.firstOrNull()
-                                if (best == null) {
-                                    routeStatus = "لم تُعثر على مطاعم قريبة في بيانات الخريطة"
-                                } else {
-                                    clusters.take(8).forEach { cluster ->
-                                        map.addMarker(MarkerOptions().position(LatLng(cluster.latitude, cluster.longitude))
-                                            .title("تجمع مطاعم • ${cluster.restaurantCount}"))
+                        val requestId = searchRequestId
+                        routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
+                        discoveryJob?.cancel()
+                        discoveryJob = scope.launch {
+                            var retry = 0
+                            while (isActive && searchActive && requestId == searchRequestId) {
+                                try {
+                                    val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
+                                        location.latitude, location.longitude
+                                    ) { updatedClusters ->
+                                        if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming
+                                        updatedClusters.take(8).forEach { cluster ->
+                                            map.addMarker(MarkerOptions().position(LatLng(cluster.latitude, cluster.longitude))
+                                                .title("تجمع مطاعم • ${cluster.restaurantCount}"))
+                                        }
+                                        val best = updatedClusters.firstOrNull() ?: return@findNearestClustersStreaming
+                                        val nextDestination = DeliveryDestination(best.latitude, best.longitude)
+                                        val previousDestination = activeDestination
+                                        val destinationChanged = if (previousDestination == null) true else {
+                                            val delta = FloatArray(1)
+                                            Location.distanceBetween(
+                                                previousDestination.latitude, previousDestination.longitude,
+                                                nextDestination.latitude, nextDestination.longitude, delta
+                                            )
+                                            delta[0] > 100f
+                                        }
+                                        if (destinationChanged) {
+                                            activeDestination = nextDestination
+                                            routeRequested = true
+                                            routeJob?.cancel()
+                                            routeStatus = "وصلت أول نتيجة صالحة • جارٍ رسم المسار"
+                                            routeJob = scope.launch {
+                                                val route = withContext(Dispatchers.IO) {
+                                                    OsrmRouteClient.fetchRoute(
+                                                        location.latitude, location.longitude,
+                                                        nextDestination.latitude, nextDestination.longitude
+                                                    )
+                                                }
+                                                if (route != null && route.points.size > 1 && requestId == searchRequestId) {
+                                                    routePolyline?.let { map.removePolyline(it) }
+                                                    routePolyline = map.addPolyline(
+                                                        PolylineOptions().addAll(route.points)
+                                                            .color(AndroidColor.rgb(94, 240, 194)).width(6f)
+                                                    )
+                                                    routePoints = route.points
+                                                    routeSteps = route.steps
+                                                    currentStepIndex = 0
+                                                    nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
+                                                    if (ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-next-turn")
+                                                    routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
+                                                } else if (requestId == searchRequestId) {
+                                                    routeStatus = "تعذر حساب المسار حالياً"
+                                                }
+                                            }
+                                        } else {
+                                            routeStatus = "تم تحديث نتائج مصادر المطاعم • أفضل تجمع: ${best.restaurantCount} مطعم"
+                                        }
                                     }
-                                    activeDestination = DeliveryDestination(best.latitude, best.longitude)
-                                    routeRequested = false
-                                    routeStatus = "أفضل تجمع ضمن ${best.searchRadiusMeters / 1000} كم: ${best.restaurantCount} مطعم • ${String.format(Locale.US, "%.1f", best.distanceMeters / 1000.0)} كم"
+                                    if (clusters.isNotEmpty()) break
+                                    routeStatus = "لم تصل نتائج بعد • مستمر في البحث"
+                                } catch (error: Exception) {
+                                    routeStatus = "تعذر مصدر مؤقتاً • مستمر في إعادة المحاولة"
                                 }
-                            } catch (error: Exception) {
-                                routeStatus = "تعذر البحث عن المطاعم: ${error.message ?: "تحقق من الإنترنت"}"
+                                retry += 1
+                                delay((2000L * (1L shl retry.coerceAtMost(4))).coerceAtMost(30000L))
                             }
                         }
                     }
@@ -438,6 +488,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 // No location provider is available on this device.
             }
             onDispose {
+                discoveryJob?.cancel()
+                routeJob?.cancel()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
             }
         }
