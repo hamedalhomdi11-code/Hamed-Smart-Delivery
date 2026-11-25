@@ -232,6 +232,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
+    var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
     var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
@@ -306,7 +307,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var firstFix = true
             var lastCameraLocation: Location? = null
             var lastRerouteAt = 0L
-            var routePolyline: org.maplibre.android.annotations.Polyline? = null
             var discoveryJob: Job? = null
             var routeJob: Job? = null
             val listener = object : LocationListener {
@@ -338,6 +338,15 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         lastProcessedSearch = searchRequestId
                         val requestId = searchRequestId
                         routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
+                        routeJob?.cancel()
+                        displayedRoutePolyline?.let { map.removePolyline(it) }
+                        displayedRoutePolyline = null
+                        routePoints = emptyList()
+                        routeSteps = emptyList()
+                        currentStepIndex = 0
+                        nextTurnInstruction = ""
+                        activeDestination = null
+                        routeRequested = false
                         discoveryJob?.cancel()
                         discoveryJob = scope.launch {
                             var retry = 0
@@ -375,8 +384,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                     )
                                                 }
                                                 if (route != null && route.points.size > 1 && requestId == searchRequestId) {
-                                                    routePolyline?.let { map.removePolyline(it) }
-                                                    routePolyline = map.addPolyline(
+                                                    displayedRoutePolyline?.let { map.removePolyline(it) }
+                                displayedRoutePolyline = null
+                                                    displayedRoutePolyline = map.addPolyline(
                                                         PolylineOptions().addAll(route.points)
                                                             .color(AndroidColor.rgb(94, 240, 194)).width(6f)
                                                     )
@@ -412,8 +422,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
                             }
                             if (route != null && route.points.size > 1) {
-                                routePolyline?.let { map.removePolyline(it) }
-                                routePolyline = map.addPolyline(
+                                displayedRoutePolyline?.let { map.removePolyline(it) }
+                                displayedRoutePolyline = null
+                                displayedRoutePolyline = map.addPolyline(
                                     PolylineOptions().addAll(route.points)
                                         .color(AndroidColor.rgb(94, 240, 194))
                                         .width(6f)
@@ -456,8 +467,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
                                 }
                                 if (updated != null && updated.points.size > 1) {
-                                    routePolyline?.let { map.removePolyline(it) }
-                                    routePolyline = map.addPolyline(
+                                    displayedRoutePolyline?.let { map.removePolyline(it) }
+                                displayedRoutePolyline = null
+                                    displayedRoutePolyline = map.addPolyline(
                                         PolylineOptions().addAll(updated.points)
                                             .color(AndroidColor.rgb(94, 240, 194))
                                             .width(6f)
