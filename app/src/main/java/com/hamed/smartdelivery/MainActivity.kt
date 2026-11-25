@@ -11,6 +11,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.graphics.Color as AndroidColor
 import android.os.Looper
+import android.os.SystemClock
 import android.os.Build
 import android.speech.tts.TextToSpeech
 import java.util.Locale
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -338,6 +340,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var lastRerouteAt = 0L
             var discoveryJob: Job? = null
             var routeJob: Job? = null
+            var markerAnimationJob: Job? = null
+            val restaurantMarkers = linkedMapOf<String, Marker>()
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
@@ -346,7 +350,23 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     if (existing == null) {
                         userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
                     } else {
-                        existing.position = point
+                        // Interpolate between GPS fixes so the position marker glides instead of jumping.
+                        markerAnimationJob?.cancel()
+                        val start = existing.position
+                        val startedAt = SystemClock.uptimeMillis()
+                        val durationMs = 700L
+                        markerAnimationJob = scope.launch {
+                            while (isActive) {
+                                val fraction = ((SystemClock.uptimeMillis() - startedAt).toFloat() / durationMs).coerceIn(0f, 1f)
+                                val eased = fraction * fraction * (3f - 2f * fraction)
+                                existing.position = LatLng(
+                                    start.latitude + (point.latitude - start.latitude) * eased,
+                                    start.longitude + (point.longitude - start.longitude) * eased
+                                )
+                                if (fraction >= 1f) break
+                                delay(16L)
+                            }
+                        }
                     }
                     val previousCameraLocation = lastCameraLocation
                     val navigating = navigationActive && activeDestination != null
@@ -372,6 +392,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         routeJob?.cancel()
                         displayedRoutePolyline?.let { map.removePolyline(it) }
                         displayedRoutePolyline = null
+                        restaurantMarkers.values.toList().forEach { map.removeMarker(it) }
+                        restaurantMarkers.clear()
                         routePoints = emptyList()
                         routeSteps = emptyList()
                         currentStepIndex = 0
@@ -388,8 +410,17 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     ) { updatedClusters ->
                                         if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming
                                         updatedClusters.take(8).forEach { cluster ->
-                                            map.addMarker(MarkerOptions().position(LatLng(cluster.latitude, cluster.longitude))
-                                                .title("تجمع مطاعم • ${cluster.restaurantCount}"))
+                                            val markerKey = "${(cluster.latitude * 100000).roundToInt()}:${(cluster.longitude * 100000).roundToInt()}"
+                                            val markerPosition = LatLng(cluster.latitude, cluster.longitude)
+                                            val existingClusterMarker = restaurantMarkers[markerKey]
+                                            if (existingClusterMarker == null) {
+                                                restaurantMarkers[markerKey] = map.addMarker(
+                                                    MarkerOptions().position(markerPosition).title("تجمع مطاعم • ${cluster.restaurantCount}")
+                                                )
+                                            } else {
+                                                existingClusterMarker.position = markerPosition
+                                                existingClusterMarker.title = "تجمع مطاعم • ${cluster.restaurantCount}"
+                                            }
                                         }
                                         val best = updatedClusters.firstOrNull() ?: return@findNearestClustersStreaming
                                         val nextDestination = DeliveryDestination(best.latitude, best.longitude)
@@ -556,6 +587,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             onDispose {
                 discoveryJob?.cancel()
                 routeJob?.cancel()
+                markerAnimationJob?.cancel()
+                restaurantMarkers.values.forEach { map.removeMarker(it) }
+                restaurantMarkers.clear()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
             }
         }
@@ -569,12 +603,12 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         )
         if (navigationActive && activeDestination != null) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).offset(y = 92.dp).size(48.dp),
+                modifier = Modifier.align(Alignment.Center).offset(y = 100.dp).size(36.dp),
                 color = Panel.copy(alpha = .94f),
                 shape = CircleShape
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(30.dp))
+                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(24.dp).rotate(currentBearing))
                 }
             }
         }
@@ -608,6 +642,20 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     Icon(Icons.Rounded.Navigation, null)
                     Spacer(Modifier.width(5.dp))
                     Text(if (navigationActive) "الملاحة تعمل" else "ابدأ الملاحة")
+                }
+                if (navigationActive) {
+                    OutlinedButton(
+                        onClick = {
+                            navigationActive = false
+                            speech.stop()
+                            routeStatus = "تم إيقاف الملاحة • المسار ما زال ظاهراً"
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    ) {
+                        Icon(Icons.Rounded.Stop, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("إيقاف الملاحة")
+                    }
                 }
                 OutlinedButton(
                     onClick = { openGoogleMaps(context, activeDestination!!) },
