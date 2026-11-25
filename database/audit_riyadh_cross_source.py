@@ -41,7 +41,7 @@ def main():
     con.row_factory = sqlite3.Row
     base = con.execute("""
       SELECT id,name,category,latitude,longitude
-      FROM places WHERE is_active=1 AND source_id='bayanat_overture_sa_2026'
+      FROM places WHERE is_active=1 AND source_id IN ('bayanat_overture_sa_2026','overture_maps_latest')
     """).fetchall()
     osm = con.execute("""
       SELECT id,name,category,latitude,longitude
@@ -81,6 +81,7 @@ def main():
       "method": "exact normalized name + haversine distance <= 60m, cross-source only",
       "is_destructive": False,
       "overture_active_records": len(base),
+      "overture_source_counts": dict(con.execute("SELECT source_id, COUNT(*) FROM places WHERE is_active=1 AND source_id IN ('bayanat_overture_sa_2026','overture_maps_latest') GROUP BY source_id").fetchall()),
       "osm_active_records": len(osm),
       "osm_records_with_likely_cross_source_duplicate": sum(distance_bands.values()),
       "distance_bands": distance_bands,
