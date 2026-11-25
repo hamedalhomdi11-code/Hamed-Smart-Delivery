@@ -132,11 +132,65 @@ def main():
             if not changed:
                 skipped += 1
 
+    # Build a separate brand index and link matched physical branches.
+    # Brand aliases are only seeds; a link is created only on an exact normalized
+    # match against source brand_name or the full place name.
+    import csv, re, unicodedata
+    def norm_brand(value):
+        if value is None:
+            return ""
+        s = unicodedata.normalize("NFKC", str(value)).casefold().strip()
+        s = re.sub(r"[\\u064B-\\u065F\\u0670]", "", s)
+        s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ى", "ي")
+        return re.sub(r"[^\\w]", "", s, flags=re.UNICODE)
+
+    con.executescript(Path("database/003_brand_directory.sql").read_text(encoding="utf-8"))
+    alias_lookup = {}
+    with open("database/riyadh_brand_index.csv", newline="", encoding="utf-8-sig") as fp:
+        for item in csv.DictReader(fp):
+            con.execute(
+                "INSERT OR IGNORE INTO brands(id,name_en,name_ar,category) VALUES (?,?,?,?)",
+                (item["brand_id"], item["name_en"], item["name_ar"], item["category"])
+            )
+            for alias in item["aliases"].split("|"):
+                normalized = norm_brand(alias)
+                if not normalized:
+                    continue
+                con.execute(
+                    "INSERT OR IGNORE INTO brand_aliases(brand_id,alias,normalized_alias) VALUES (?,?,?)",
+                    (item["brand_id"], alias, normalized)
+                )
+                alias_lookup.setdefault(normalized, item["brand_id"])
+
+    linked = 0
+    for place_id, place_name, source_brand in con.execute(
+        "SELECT id,name,brand FROM places"
+    ).fetchall():
+        brand_key = norm_brand(source_brand)
+        method = "source_brand_name"
+        if not brand_key:
+            brand_key = norm_brand(place_name)
+            method = "exact_alias_name"
+        brand_id = alias_lookup.get(brand_key)
+        if brand_id:
+            con.execute(
+                "INSERT OR IGNORE INTO brand_place_links(brand_id,place_id,match_method,match_confidence) VALUES (?,?,?,?)",
+                (brand_id, place_id, method, 0.95 if method == "source_brand_name" else 0.85)
+            )
+            linked += con.execute("SELECT changes()").fetchone()[0]
+
+    brand_counts = dict(con.execute("""
+        SELECT b.name_en, COUNT(l.place_id)
+        FROM brands b LEFT JOIN brand_place_links l ON l.brand_id=b.id
+        GROUP BY b.id ORDER BY COUNT(l.place_id) DESC, b.name_en
+    """).fetchall())
     total = con.execute("SELECT COUNT(*) FROM places").fetchone()[0]
     by_cat = dict(con.execute("SELECT category,COUNT(*) FROM places GROUP BY category").fetchall())
     con.close()
     report = {"total_records": total, "inserted": inserted, "skipped": skipped,
-              "category_counts": by_cat, "source_rows_in_riyadh_bbox": int(len(df)),
+              "category_counts": by_cat, "brand_index_count": len(brand_counts),
+              "brand_branch_links": linked, "branches_by_brand": brand_counts,
+              "source_rows_in_riyadh_bbox": int(len(df)),
               "coverage": "Riyadh Region + metropolitan bounding box; not an official boundary polygon",
               "source": "Bayanat Labs Arab World Places Atlas v1.0.0 / Overture 2026-10-21"}
     Path(str(OUT)+".report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
