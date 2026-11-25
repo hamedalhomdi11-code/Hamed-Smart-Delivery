@@ -334,7 +334,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     }
                                     activeDestination = DeliveryDestination(best.latitude, best.longitude)
                                     routeRequested = false
-                                    routeStatus = "أفضل تجمع: ${best.restaurantCount} مطعم • ${String.format(Locale.US, "%.1f", best.distanceMeters / 1000.0)} كم"
+                                    routeStatus = "أفضل تجمع ضمن ${best.searchRadiusMeters / 1000} كم: ${best.restaurantCount} مطعم • ${String.format(Locale.US, "%.1f", best.distanceMeters / 1000.0)} كم"
                                 }
                             } catch (error: Exception) {
                                 routeStatus = "تعذر البحث عن المطاعم: ${error.message ?: "تحقق من الإنترنت"}"
