@@ -13,7 +13,7 @@ object DestinationLinkParser {
 
     fun parse(sharedText: String?): DeliveryDestination? {
         if (sharedText.isNullOrBlank()) return null
-        val decoded = URLDecoder.decode(sharedText.replace("+", "%2B"), "UTF-8")
+        val decoded = runCatching { URLDecoder.decode(sharedText.replace("+", "%2B"), "UTF-8") }.getOrElse { sharedText }
         for (pattern in coordinatePatterns) {
             val match = pattern.find(decoded) ?: continue
             val latitude = match.groupValues[1].toDoubleOrNull() ?: continue
