@@ -89,7 +89,8 @@ def main():
     inserted = skipped = 0
     with con:
         for _, r in df.iterrows():
-            name = str(r.get("name") or "").strip()
+            raw_name = r.get("name")
+            name = "" if raw_name is None or pd.isna(raw_name) else str(raw_name).strip()
             if not name or name.lower() == "nan":
                 skipped += 1; continue
             try:
@@ -126,8 +127,10 @@ def main():
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
               (pid,"bayanat_overture_sa_2026",source_id,name,clean(name_ar),clean(brand),category,
                clean(address),clean(district),"Riyadh","SA",lat,lon,dedupe,license_text,confidence))
-            inserted += con.execute("SELECT changes()").fetchone()[0]
-            skipped += 1 - con.execute("SELECT changes()").fetchone()[0] if False else 0
+            changed = con.execute("SELECT changes()").fetchone()[0]
+            inserted += changed
+            if not changed:
+                skipped += 1
 
     total = con.execute("SELECT COUNT(*) FROM places").fetchone()[0]
     by_cat = dict(con.execute("SELECT category,COUNT(*) FROM places GROUP BY category").fetchall())
