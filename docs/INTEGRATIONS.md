@@ -1,9 +1,10 @@
 # Integrations and prerequisites
 
-- **Map rendering:** OpenStreetMap tiles are integrated through osmdroid, with visible attribution. Tile usage must comply with the OSM tile usage policy; public tile servers do not guarantee production availability.
-- **Routing:** still requires a routing provider, usage-policy review, route drawing, rerouting and real-device testing. Do not treat the current map as turn-by-turn navigation.
-- **Location:** Android foreground location permission is integrated for the active app session. A foreground location service and notification are still required for reliable navigation while the app is backgrounded.
-- **Remote control:** optional; requires a separately deployed authenticated backend, per-device credentials, command expiry/idempotency, local state-machine validation, audit history and revocation. Do not embed long-lived secrets in the APK.
-- **HungerStation links:** Android share/open-with integration can process links the user explicitly shares; private app APIs are not assumed or scraped.
+- **Map renderer:** MapLibre Native Android OpenGL SDK. The app loads the OpenFreeMap Liberty style and enables map attribution. Review the style/tiles provider's usage terms before commercial production.
+- **Routing:** a best-effort driving route preview uses the public OSRM demo endpoint. It is not guaranteed for production traffic, does not provide voice instructions in this build, and may be rate-limited. Production requires a supported routing provider or a managed self-hosted OSRM/Valhalla instance.
+- **Location:** Android foreground location permission and a user-started location foreground service are implemented. The service displays an ongoing notification and does not persist raw coordinates.
+- **Shared destinations:** common coordinate pairs and full Google Maps coordinate links can be extracted from Android shares. Short links and address-only text still need secure resolution/geocoding.
+- **Remote control:** optional; requires a separately deployed authenticated backend, per-device credentials, command expiry/idempotency, local state-machine validation, audit history and revocation. Never embed long-lived secrets in the APK.
+- **HungerStation:** Android share/open-with integration processes links explicitly shared by the user; private app APIs are not assumed or scraped.
 - **Restaurant data:** store only restaurant/business details and delivery observations needed for ranking. Never retain customer names, phone numbers or delivery addresses.
-- **Release signing:** configure a protected signing key outside source control before publishing a release APK. A CI debug APK is not a final signed production release.
+- **Release signing:** configure a protected signing key outside source control before publishing a release APK. A CI debug APK is installable for testing but is not a production-signed release.
