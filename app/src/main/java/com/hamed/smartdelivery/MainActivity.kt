@@ -306,7 +306,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     val currentRoute = routePoints
-                    if (destination != null && currentRoute.size > 1 && !routeRequested) {
+                    if (destination != null && currentRoute.size > 1) {
                         val nearestDistance = currentRoute.minOf { routePoint ->
                             val result = FloatArray(1)
                             Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
