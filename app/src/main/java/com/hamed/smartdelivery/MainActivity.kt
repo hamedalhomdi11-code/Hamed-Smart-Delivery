@@ -76,6 +76,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     var driverSnapshot by remember { mutableStateOf(DriverSnapshot()) }
     var trackingActive by remember { mutableStateOf(false) }
+    var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
     var hasLocationPermission by remember {
@@ -95,39 +96,50 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         }
     }
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
+    val toggleTracking: () -> Unit = {
+        if (!hasLocationPermission) {
+            locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        } else if (trackingActive) {
+            context.stopService(Intent(context, LocationTrackingService::class.java))
+            trackingActive = false
+        } else {
+            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+            trackingActive = true
+        }
+    }
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
         MaterialTheme(colorScheme = darkColorScheme(background = Night, surface = Panel, primary = Mint)) {
             Column(Modifier.fillMaxSize().background(Night)) {
                 Header(title, english) { english = !english }
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    SmartMap(hasLocationPermission, initialDestination, trackingActive)
-                    Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
-                        MiniMetric(if (english) "Map" else "الخريطة", "OpenStreetMap", Icons.Rounded.Map)
-                    }
-                    Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        MapAction(Icons.Rounded.MyLocation) {
-                            if (!hasLocationPermission) {
-                                locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                            } else if (trackingActive) {
-                                context.stopService(Intent(context, LocationTrackingService::class.java))
-                                trackingActive = false
-                            } else {
-                                ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-                                trackingActive = true
+                if (selected == 0) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D)
+                        Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
+                            MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
+                        }
+                        Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            MapAction(Icons.Rounded.MyLocation, toggleTracking)
+                            MapAction(Icons.Rounded.Layers) { perspective3D = !perspective3D }
+                        }
+                        Column(Modifier.align(Alignment.BottomEnd).padding(14.dp), horizontalAlignment = Alignment.End) {
+                            Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
+                                Text("© OpenStreetMap contributors", color = Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
                             }
                         }
-                        MapAction(Icons.Rounded.Layers) { }
                     }
-                    Column(Modifier.align(Alignment.BottomEnd).padding(14.dp), horizontalAlignment = Alignment.End) {
-                        Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
-                            Text("© OpenStreetMap contributors", color = Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+                    Dashboard(driverSnapshot, english) { command ->
+                        val transition = DriverReducer.reduce(driverSnapshot, command)
+                        if (transition.accepted) driverSnapshot = transition.snapshot
+                    }
+                } else {
+                    Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp)) {
+                        when (selected) {
+                            1 -> OrdersScreen(driverSnapshot, english)
+                            2 -> PlacesScreen(english)
+                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking)
                         }
                     }
-                }
-                Dashboard(driverSnapshot, english) { command ->
-                    val transition = DriverReducer.reduce(driverSnapshot, command)
-                    if (transition.accepted) driverSnapshot = transition.snapshot
                 }
                 NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
                     val labels = if (english) listOf("Drive", "Orders", "Places", "Profile") else listOf("الملاحة", "الطلبات", "التجمعات", "حسابي")
@@ -161,7 +173,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -200,13 +212,23 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 map.cameraPosition = CameraPosition.Builder()
                     .target(destination?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(24.7136, 46.6753))
                     .zoom(if (destination == null) 13.5 else 15.0)
-                    .tilt(50.0)
+                    .tilt(if (perspective3D) 50.0 else 0.0)
                     .build()
                 if (destination != null) {
                     map.addMarker(MarkerOptions().position(LatLng(destination.latitude, destination.longitude)).title("وجهة التوصيل"))
                 }
                 styleReady = true
             }
+        }
+    }
+
+    LaunchedEffect(mapLibreMap, perspective3D) {
+        mapLibreMap?.let { map ->
+            val current = map.cameraPosition
+            map.animateCamera(CameraUpdateFactory.newCameraPosition(
+                CameraPosition.Builder().target(current.target).zoom(current.zoom).bearing(current.bearing)
+                    .tilt(if (perspective3D) 50.0 else 0.0).build()
+            ), 500)
         }
     }
 
@@ -392,3 +414,86 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (Dr
         }
     }
 }
+
+@Composable
+private fun OrdersScreen(snapshot: DriverSnapshot, english: Boolean) {
+    val current = when (snapshot.mode) {
+        DriverMode.IDLE -> if (english) "No active delivery" else "لا يوجد توصيل نشط"
+        DriverMode.SEARCHING -> if (english) "Searching for an order" else "البحث عن طلب"
+        DriverMode.ORDER_RECEIVED -> if (english) "Order received" else "تم استلام طلب"
+        DriverMode.TO_RESTAURANT -> if (english) "On the way to restaurant" else "في الطريق إلى المطعم"
+        DriverMode.PICKUP -> if (english) "Picked up from restaurant" else "تم الاستلام من المطعم"
+        DriverMode.TO_CUSTOMER -> if (english) "On the way to customer" else "في الطريق إلى العميل"
+        DriverMode.COMPLETED -> if (english) "Last delivery completed" else "اكتمل آخر توصيل"
+        DriverMode.SAFE_MODE -> if (english) "Safe mode is active" else "وضع الأمان مفعّل"
+    }
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(if (english) "MY DELIVERY" else "طلباتي", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (english) "CURRENT DRIVER STATE" else "حالة المندوب الحالية", color = Muted, fontSize = 10.sp)
+                Text(current, color = Mint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(if (english) "This state is controlled locally. No private HungerStation account data is read." else "هذه الحالة تُدار محلياً، ولا تتم قراءة بيانات حساب هنقرستيشن الخاصة.", color = Muted, fontSize = 12.sp)
+            }
+        }
+        Text(if (english) "Delivery stages" else "مراحل التوصيل", color = Color.White, fontWeight = FontWeight.SemiBold)
+        listOf(
+            DriverMode.ORDER_RECEIVED to if (english) "Order received" else "استلام الطلب",
+            DriverMode.TO_RESTAURANT to if (english) "Go to restaurant" else "التوجه للمطعم",
+            DriverMode.PICKUP to if (english) "Confirm pickup" else "تأكيد الاستلام",
+            DriverMode.TO_CUSTOMER to if (english) "Go to customer" else "التوجه للعميل",
+            DriverMode.COMPLETED to if (english) "Complete delivery" else "إتمام التوصيل"
+        ).forEach { (stage, label) ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(if (snapshot.mode == stage) Icons.Rounded.CheckCircle else Icons.Rounded.Circle, null, tint = if (snapshot.mode == stage) Mint else Muted, modifier = Modifier.size(17.dp))
+                Text(label, color = if (snapshot.mode == stage) Color.White else Muted, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlacesScreen(english: Boolean) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(if (english) "RESTAURANT CLUSTERS" else "تجمعات المطاعم", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Icon(Icons.Rounded.Restaurant, null, tint = Mint, modifier = Modifier.size(28.dp))
+                Text(if (english) "Restaurant discovery is being connected" else "يجري تجهيز اكتشاف المطاعم", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    if (english) "The ranking model separates public map signals from your observed order history. No live demand is fabricated. Nearby restaurant feeds and saved observations are not active yet."
+                    else "نموذج الترتيب يفرّق بين إشارات الخرائط العامة وسجل الطلبات الذي ترصده بنفسك. لن نخترع طلباً أو ازدحاماً غير حقيقي. مصادر المطاعم القريبة وحفظ الملاحظات لم تُفعّل بعد.",
+                    color = Muted, fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(if (english) "PROFILE & SETTINGS" else "حسابي والإعدادات", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleLanguage() }) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Language, null, tint = Mint)
+                Spacer(Modifier.width(12.dp))
+                Text(if (english) "Switch to Arabic" else "تغيير اللغة إلى الإنجليزية", color = Color.White, modifier = Modifier.weight(1f))
+                Icon(Icons.Rounded.ChevronRight, null, tint = Muted)
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleTracking() }) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.GpsFixed, null, tint = Mint)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(if (english) "Background GPS session" else "جلسة تتبع GPS", color = Color.White)
+                    Text(if (trackingActive) if (english) "Active" else "نشطة" else if (english) "Stopped" else "متوقفة", color = Muted, fontSize = 11.sp)
+                }
+                Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
+            }
+        }
+        Text("HAMED SMART DELIVERY • 0.2.0", color = Muted, fontSize = 10.sp)
+    }
+}
+
