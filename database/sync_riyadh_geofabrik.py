@@ -10,6 +10,8 @@ import hashlib
 import json
 import sqlite3
 import sys
+import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +40,12 @@ def classify(tags):
         return "grocery"
     return "other"
 
+def normalize_brand(value):
+    text = unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
+    text = re.sub(r'[\u064B-\u065F\u0670]', '', text)
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ى', 'ي')
+    return re.sub(r'[^\w]', '', text, flags=re.UNICODE)
+
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("Usage: sync_riyadh_geofabrik.py <sqlite-db> <geojson>")
@@ -51,7 +59,7 @@ def main():
       VALUES (?,?,?,?,?,?)""",
       (SOURCE_ID, "OpenStreetMap Geofabrik GCC extract (Riyadh clip)", "open_map",
        SOURCE_URL, "Open Database License (ODbL) 1.0", USER_AGENT_NOTE))
-    inserted = skipped = 0
+    inserted = skipped = brand_links_created = 0
     skip_reasons = {"no_name": 0, "no_geometry": 0, "bad_geometry": 0, "outside_bbox": 0, "no_osm_id": 0}
     category_counts = {}
     for feature in data.get("features", []):
@@ -118,6 +126,13 @@ def main():
            address,district,"Riyadh","SA",lat,lon,dedupe_key,"ODbL-1.0",0.9,now,now))
         if cur.rowcount:
             inserted += 1
+        # Exact alias matching only; no fuzzy brand inference.
+        brand_key = normalize_brand(brand) or normalize_brand(name)
+        if brand_key:
+            match = con.execute('SELECT brand_id FROM brand_aliases WHERE normalized_alias=? LIMIT 1', (brand_key,)).fetchone()
+            if match:
+                con.execute('INSERT OR IGNORE INTO brand_place_links (brand_id,place_id,match_method,match_confidence) VALUES (?,?,?,?)', (match[0], place_id, 'source_brand_name' if brand else 'exact_alias_name', 0.95 if brand else 0.85))
+                brand_links_created += con.execute('SELECT changes()').fetchone()[0]
         category_counts[category] = category_counts.get(category, 0) + 1
     con.execute("UPDATE data_sources SET last_sync_at=? WHERE id=?", (now,SOURCE_ID))
     con.commit()
@@ -130,6 +145,7 @@ def main():
         "skipped": skipped,
         "skip_reasons": skip_reasons,
         "records_seen_by_category": category_counts,
+        "brand_links_created": brand_links_created,
         "geofabrik_source_records_active": source_total,
         "active_riyadh_places_total": total,
         "source": "OpenStreetMap / Geofabrik GCC extract",
