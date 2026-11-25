@@ -3,7 +3,7 @@
 ## Implemented in the current development line
 - Kotlin + Jetpack Compose Android shell.
 - Arabic/English toggle and RTL/LTR layout.
-- Driver-first dark UI and interactive search/order state prototype.
+- Driver-first dark UI with manual order lifecycle wired through the validated domain state reducer.
 - Explainable restaurant-cluster scoring model and domain unit tests.
 - GitHub Actions test + debug APK build workflow.
 - MapLibre Native Android OpenGL map renderer with OpenFreeMap style and a 50-degree perspective camera.
@@ -16,7 +16,7 @@
 2. Add route steps, voice guidance, route progress, off-route detection and automatic rerouting.
 3. Add camera follow/bearing smoothing and navigation-safe controls.
 4. Add Room persistence for restaurant observations and trip summaries, excluding customer personal data.
-5. Complete the actual driver state-machine wiring; the current visual order action is still a UI prototype.
+5. Connect the local driver lifecycle to real delivery/order data sources; the current state transitions are manual and do not read private delivery-platform APIs.
 6. Add overlay mode with explicit permission and safe background lifecycle handling.
 7. Build the optional authenticated remote-control backend, device pairing, command expiry/idempotency, audit and offline queue.
 8. Add real restaurant/business data sources and transparent freshness/confidence labels; do not infer or fabricate demand.
