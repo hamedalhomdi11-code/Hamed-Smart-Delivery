@@ -28,6 +28,30 @@ jobs:
           test -s data/source/places-SA.parquet
       - name: Build SQLite database
         run: python database/build_riyadh_atlas.py data/source/places-SA.parquet data/output/hamed_smart_delivery_riyadh.sqlite
+      - name: Sync additional Riyadh POIs from OpenStreetMap
+        run: |
+          python database/sync_riyadh_osm.py data/output/hamed_smart_delivery_riyadh.sqlite | tee data/output/osm_sync.report.json
+          python - <<'PY'
+          import json, sqlite3
+          db = "data/output/hamed_smart_delivery_riyadh.sqlite"
+          report_path = db + ".report.json"
+          report = json.load(open(report_path, encoding="utf-8"))
+          osm = json.load(open("data/output/osm_sync.report.json", encoding="utf-8"))
+          con = sqlite3.connect(db)
+          report["osm_sync"] = osm
+          report["merged_active_places_total"] = con.execute(
+              "SELECT COUNT(*) FROM places WHERE is_active=1"
+          ).fetchone()[0]
+          report["merged_category_counts"] = dict(con.execute(
+              "SELECT category, COUNT(*) FROM places WHERE is_active=1 GROUP BY category"
+          ).fetchall())
+          report["source_counts"] = dict(con.execute(
+              "SELECT source_id, COUNT(*) FROM places WHERE is_active=1 GROUP BY source_id"
+          ).fetchall())
+          json.dump(report, open(report_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          con.close()
+          print(json.dumps(report, ensure_ascii=False))
+          PY
       - name: Upload database artifact
         uses: actions/upload-artifact@v4
         with:
@@ -35,4 +59,5 @@ jobs:
           path: |
             data/output/hamed_smart_delivery_riyadh.sqlite
             data/output/hamed_smart_delivery_riyadh.sqlite.report.json
+            data/output/osm_sync.report.json
           retention-days: 30
