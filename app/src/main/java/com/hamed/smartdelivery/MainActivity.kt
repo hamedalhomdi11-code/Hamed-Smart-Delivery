@@ -66,11 +66,24 @@ private val Cyan = Color(0xFF53C7F4)
 private val Muted = Color(0xFF8EA5B8)
 
 class MainActivity : ComponentActivity() {
+    private var sharedDestination by mutableStateOf<DeliveryDestination?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
-        val sharedText = intent?.getStringExtra(Intent.EXTRA_TEXT) ?: intent?.dataString
-        setContent { HamedApp(DestinationLinkParser.parse(sharedText)) }
+        sharedDestination = parseSharedDestination(intent)
+        setContent { HamedApp(sharedDestination) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedDestination = parseSharedDestination(intent)
+    }
+
+    private fun parseSharedDestination(source: Intent?): DeliveryDestination? {
+        val sharedText = source?.getStringExtra(Intent.EXTRA_TEXT) ?: source?.dataString
+        return DestinationLinkParser.parse(sharedText)
     }
 }
 
@@ -211,7 +224,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var activeDestination by remember { mutableStateOf(destination) }
+    var activeDestination by remember(destination) { mutableStateOf(destination) }
     var lastProcessedSearch by remember { mutableIntStateOf(0) }
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
