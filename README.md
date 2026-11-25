@@ -2,7 +2,7 @@
 
 **حامد سمارت دليفري** — Android-first smart courier navigation and dispatch assistant.
 
-> Current development status: the driver-first Arabic/English interface is retained and the mock map has been replaced with a real OpenStreetMap (OSM) map view. The app now requests Android foreground location permission and can display the device location while the app is open. This is an integration milestone, not yet a production-ready navigation release: turn-by-turn routing, background location service, delivery-link extraction, persistent trip/restaurant storage, remote-control backend, device QA and signed release packaging remain to be completed and verified.
+> Current development status: the original driver-first Arabic/English interface is retained. The map now uses MapLibre Native with an OpenFreeMap style and a 50-degree tilted camera. The app requests foreground location permission, starts an explicit user-controlled Android location foreground service, accepts shared coordinate links from other apps, and can draw a driving route using OSRM. This is an integration milestone, not yet a production-ready navigation release: spoken turn guidance, route rerouting, persistent trip/restaurant storage, real restaurant-demand feeds, optional remote-control backend, device QA and protected release signing remain.
 
 ## Product principles
 - Arabic-first with English toggle; RTL/LTR layout.
@@ -15,11 +15,12 @@
 - No customer personal data is retained.
 
 ## Maps and location
-- Map rendering: OpenStreetMap tiles via osmdroid.
-- Map attribution is shown in the app.
-- Initial map viewport is Riyadh; user location is requested only after a user action.
-- Location marker is available while the app is in the foreground and permission is granted.
-- OSM tile and routing services have usage policies and public endpoints are not a guaranteed production SLA. A production routing provider and device testing are still required.
+- Map renderer: MapLibre Native Android (OpenGL renderer).
+- Style/tiles: OpenFreeMap Liberty style, with map attribution enabled and a visible OSM credit.
+- Camera: 50-degree tilt to provide a perspective navigation view.
+- Location: explicit foreground/coarse/fine permission flow and a user-started foreground GPS service with an ongoing notification.
+- Shared destination import: coordinates and common full Google Maps coordinate links.
+- Route preview: OSRM public demo endpoint. It is best-effort for development and is not a production SLA; service availability, routing coverage and usage limits are external.
 
 ## Build
 Open in Android Studio (JDK 17, Android SDK 35) and build `:app:assembleDebug`.
