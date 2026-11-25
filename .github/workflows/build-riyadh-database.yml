@@ -79,6 +79,22 @@ jobs:
           con.close()
           print(json.dumps(report, ensure_ascii=False))
           PY
+      - name: Audit possible cross-source duplicate locations
+        run: |
+          python database/audit_riyadh_cross_source.py \
+            data/output/hamed_smart_delivery_riyadh.sqlite \
+            data/output/cross_source_duplicate_audit.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report_path = Path("data/output/hamed_smart_delivery_riyadh.sqlite.report.json")
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          audit = json.loads(Path("data/output/cross_source_duplicate_audit.json").read_text(encoding="utf-8"))
+          report["cross_source_duplicate_audit"] = {
+              k: v for k, v in audit.items() if k != "examples"
+          }
+          report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
       - name: Upload database artifact
         uses: actions/upload-artifact@v4
         with:
@@ -87,4 +103,5 @@ jobs:
             data/output/hamed_smart_delivery_riyadh.sqlite
             data/output/hamed_smart_delivery_riyadh.sqlite.report.json
             data/output/osm_sync.report.json
+            data/output/cross_source_duplicate_audit.json
           retention-days: 30
