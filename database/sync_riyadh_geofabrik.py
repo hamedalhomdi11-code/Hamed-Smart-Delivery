@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Import licensed OpenStreetMap POIs exported from a Geofabrik GCC PBF extract.
+"""Import a broad, named OpenStreetMap POI set from the Geofabrik GCC extract.
 
-Input GeoJSON must come from the official Geofabrik GCC extract, clipped to the
-Riyadh metro envelope and filtered to relevant amenity/shop/craft tags.
+The import is intentionally additive and source-preserving. It includes food,
+retail, health, public services, tourism, leisure and transport POIs. Non-food
+POIs remain in the existing 'other' category to avoid changing the app schema.
 Attribution: © OpenStreetMap contributors, ODbL 1.0.
 """
 import hashlib
@@ -20,20 +21,21 @@ def classify(tags):
     amenity = tags.get("amenity", "")
     shop = tags.get("shop", "")
     craft = tags.get("craft", "")
+    healthcare = tags.get("healthcare", "")
     if amenity in {"restaurant", "fast_food", "food_court"}:
         return "restaurant"
     if amenity in {"cafe", "ice_cream"}:
         return "cafe"
     if craft == "bakery" or shop == "bakery":
         return "bakery"
-    if shop in {"supermarket"}:
-        return "supermarket"
-    if shop in {"department_store", "mall", "wholesale"}:
-        return "hypermarket"
-    if shop in {"convenience", "greengrocer", "general"}:
-        return "grocery"
-    if shop == "pharmacy":
+    if shop == "pharmacy" or amenity == "pharmacy" or healthcare == "pharmacy":
         return "pharmacy"
+    if shop == "supermarket":
+        return "supermarket"
+    if shop in {"department_store", "mall", "wholesale", "hypermarket"}:
+        return "hypermarket"
+    if shop in {"convenience", "greengrocer", "general", "grocery"}:
+        return "grocery"
     return "other"
 
 def main():
@@ -49,12 +51,15 @@ def main():
       VALUES (?,?,?,?,?,?)""",
       (SOURCE_ID, "OpenStreetMap Geofabrik GCC extract (Riyadh clip)", "open_map",
        SOURCE_URL, "Open Database License (ODbL) 1.0", USER_AGENT_NOTE))
-    inserted = updated = skipped = 0
+    inserted = skipped = 0
     skip_reasons = {"no_name": 0, "no_geometry": 0, "bad_geometry": 0, "outside_bbox": 0, "no_osm_id": 0}
+    category_counts = {}
     for feature in data.get("features", []):
         props = feature.get("properties") or {}
         tags = {str(k): str(v) for k, v in props.items() if not str(k).startswith("@") and v is not None}
-        name = (tags.get("name") or tags.get("name:ar") or tags.get("name:en") or tags.get("official_name") or tags.get("brand") or tags.get("brand:en") or tags.get("brand:ar") or tags.get("operator") or "").strip()
+        name = (tags.get("name") or tags.get("name:ar") or tags.get("name:en")
+                or tags.get("official_name") or tags.get("brand") or tags.get("brand:en")
+                or tags.get("brand:ar") or tags.get("operator") or "").strip()
         if not name:
             skipped += 1
             skip_reasons["no_name"] += 1
@@ -66,7 +71,6 @@ def main():
             skip_reasons["no_geometry"] += 1
             continue
         try:
-            # GeoJSON geometry from osmium export; compute a representative point.
             from shapely.geometry import shape
             point = shape(geom).representative_point()
             lon, lat = float(point.x), float(point.y)
@@ -78,9 +82,7 @@ def main():
             skipped += 1
             skip_reasons["outside_bbox"] += 1
             continue
-        osm_identity = feature.get("id") or props.get("@id")
-        if not osm_identity:
-            osm_identity = props.get("osm_id") or props.get("id")
+        osm_identity = feature.get("id") or props.get("@id") or props.get("osm_id") or props.get("id")
         if not osm_identity:
             skipped += 1
             skip_reasons["no_osm_id"] += 1
@@ -116,6 +118,7 @@ def main():
            address,district,"Riyadh","SA",lat,lon,dedupe_key,"ODbL-1.0",0.9,now,now))
         if cur.rowcount:
             inserted += 1
+        category_counts[category] = category_counts.get(category, 0) + 1
     con.execute("UPDATE data_sources SET last_sync_at=? WHERE id=?", (now,SOURCE_ID))
     con.commit()
     total = con.execute("SELECT COUNT(*) FROM places WHERE city='Riyadh' AND country_code='SA' AND is_active=1").fetchone()[0]
@@ -126,9 +129,11 @@ def main():
         "inserted_or_updated": inserted,
         "skipped": skipped,
         "skip_reasons": skip_reasons,
+        "records_seen_by_category": category_counts,
         "geofabrik_source_records_active": source_total,
         "active_riyadh_places_total": total,
         "source": "OpenStreetMap / Geofabrik GCC extract",
+        "scope": "named food, retail, health, public-service, tourism, leisure and transport POIs",
         "license": "ODbL-1.0",
         "attribution": "© OpenStreetMap contributors",
         "synced_at": now
