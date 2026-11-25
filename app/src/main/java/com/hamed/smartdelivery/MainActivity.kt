@@ -165,6 +165,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var routeRequested by remember(destination) { mutableStateOf(false) }
@@ -204,13 +205,14 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 if (destination != null) {
                     map.addMarker(MarkerOptions().position(LatLng(destination.latitude, destination.longitude)).title("وجهة التوصيل"))
                 }
+                styleReady = true
             }
         }
     }
 
-    DisposableEffect(mapLibreMap, hasLocationPermission, destination, trackingActive) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, destination, trackingActive) {
         val map = mapLibreMap
-        if (map == null || !hasLocationPermission) {
+        if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
         } else {
             val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
