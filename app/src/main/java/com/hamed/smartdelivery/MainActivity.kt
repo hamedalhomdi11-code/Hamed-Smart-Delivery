@@ -1,5 +1,6 @@
 package com.hamed.smartdelivery
 
+import kotlin.math.roundToInt
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
