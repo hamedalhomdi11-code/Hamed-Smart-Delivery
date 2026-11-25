@@ -9,6 +9,8 @@ import android.location.LocationManager
 import android.graphics.Color as AndroidColor
 import android.os.Looper
 import android.os.Build
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -186,7 +188,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
+    var nextTurnInstruction by remember(destination) { mutableStateOf("") }
+    var routePoints by remember(destination) { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeSteps by remember(destination) { mutableStateOf<List<RouteStep>>(emptyList()) }
+    var currentStepIndex by remember(destination) { mutableIntStateOf(0) }
     var routeRequested by remember(destination) { mutableStateOf(false) }
+    var ttsReady by remember { mutableStateOf(false) }
+    val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
+    LaunchedEffect(ttsReady) {
+        if (ttsReady) speech.language = Locale("ar", "SA")
+    }
+    DisposableEffect(speech) {
+        onDispose { speech.stop(); speech.shutdown() }
+    }
     val scope = rememberCoroutineScope()
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
@@ -246,6 +260,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
             var firstFix = true
             var lastCameraLocation: Location? = null
+            var lastRerouteAt = 0L
+            var routePolyline: org.maplibre.android.annotations.Polyline? = null
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
@@ -276,14 +292,65 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
                             }
                             if (route != null && route.points.size > 1) {
-                                map.addPolyline(
+                                routePolyline?.let { map.removePolyline(it) }
+                                routePolyline = map.addPolyline(
                                     PolylineOptions().addAll(route.points)
                                         .color(AndroidColor.rgb(94, 240, 194))
                                         .width(6f)
                                 )
+                                routePoints = route.points
+                                routeSteps = route.steps
+                                currentStepIndex = 0
+                                nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
+                                if (ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-next-turn")
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
                             } else {
                                 routeStatus = "تعذر حساب المسار حالياً"
+                            }
+                        }
+                    }
+                    val currentStep = routeSteps.getOrNull(currentStepIndex)
+                    val maneuverPoint = currentStep?.location
+                    if (maneuverPoint != null) {
+                        val distanceToManeuver = FloatArray(1)
+                        Location.distanceBetween(location.latitude, location.longitude, maneuverPoint.latitude, maneuverPoint.longitude, distanceToManeuver)
+                        if (distanceToManeuver[0] <= 45f && currentStepIndex < routeSteps.lastIndex) {
+                            currentStepIndex += 1
+                            nextTurnInstruction = routeSteps.getOrNull(currentStepIndex)?.instruction ?: "وصلت إلى وجهتك"
+                            if (ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-turn-$currentStepIndex")
+                        }
+                    }
+                    val currentRoute = routePoints
+                    if (destination != null && currentRoute.size > 1) {
+                        val nearestDistance = currentRoute.minOf { routePoint ->
+                            val result = FloatArray(1)
+                            Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
+                            result[0]
+                        }
+                        val now = System.currentTimeMillis()
+                        if (nearestDistance > 85f && now - lastRerouteAt > 20000L) {
+                            lastRerouteAt = now
+                            routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
+                            scope.launch {
+                                val updated = withContext(Dispatchers.IO) {
+                                    OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
+                                }
+                                if (updated != null && updated.points.size > 1) {
+                                    routePolyline?.let { map.removePolyline(it) }
+                                    routePolyline = map.addPolyline(
+                                        PolylineOptions().addAll(updated.points)
+                                            .color(AndroidColor.rgb(94, 240, 194))
+                                            .width(6f)
+                                    )
+                                    routePoints = updated.points
+                                    routeSteps = updated.steps
+                                    currentStepIndex = 0
+                                    nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
+                                    if (ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
+                                    routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
+                                } else {
+                                    routeStatus = "تعذر تحديث المسار حالياً"
+                                }
                             }
                         }
                     }
@@ -309,6 +376,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
+        if (nextTurnInstruction.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 70.dp, vertical = 12.dp),
+                color = Panel.copy(alpha = .96f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(nextTurnInstruction, color = Color.White, fontSize = 12.sp, maxLines = 2)
+                }
+            }
+        }
         if (routeStatus.isNotBlank()) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
