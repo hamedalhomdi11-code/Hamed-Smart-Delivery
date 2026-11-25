@@ -184,12 +184,18 @@ def main():
         FROM brands b LEFT JOIN brand_place_links l ON l.brand_id=b.id
         GROUP BY b.id ORDER BY COUNT(l.place_id) DESC, b.name_en
     """).fetchall())
+    # Persist brand registry and branch links before closing the SQLite file.
+    con.commit()
     total = con.execute("SELECT COUNT(*) FROM places").fetchone()[0]
     by_cat = dict(con.execute("SELECT category,COUNT(*) FROM places GROUP BY category").fetchall())
+    persisted_brands = con.execute("SELECT COUNT(*) FROM brands").fetchone()[0]
+    persisted_links = con.execute("SELECT COUNT(*) FROM brand_place_links").fetchone()[0]
+    if persisted_brands != len(brand_counts) or persisted_links != linked:
+        raise RuntimeError("Brand index persistence check failed")
     con.close()
     report = {"total_records": total, "inserted": inserted, "skipped": skipped,
-              "category_counts": by_cat, "brand_index_count": len(brand_counts),
-              "brand_branch_links": linked, "branches_by_brand": brand_counts,
+              "category_counts": by_cat, "brand_index_count": persisted_brands,
+              "brand_branch_links": persisted_links, "branches_by_brand": brand_counts,
               "source_rows_in_riyadh_bbox": int(len(df)),
               "coverage": "Riyadh Region + metropolitan bounding box; not an official boundary polygon",
               "source": "Bayanat Labs Arab World Places Atlas v1.0.0 / Overture 2026-10-21"}
