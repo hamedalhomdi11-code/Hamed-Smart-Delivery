@@ -86,18 +86,19 @@ object RestaurantDiscoveryClient {
                 setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                 setRequestProperty("Accept", "application/json")
             }
+            val activeConnection = connection ?: error("تعذر إنشاء اتصال بمصدر المطاعم")
             val body = "data=" + URLEncoder.encode(query, "UTF-8")
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            activeConnection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
 
-            val status = connection.responseCode
+            val status = activeConnection.responseCode
             if (status !in 200..299) {
                 val detail = runCatching {
-                    (connection.errorStream ?: connection.inputStream).bufferedReader().use { it.readText().take(300) }
+                    (activeConnection.errorStream ?: activeConnection.inputStream).bufferedReader().use { it.readText().take(300) }
                 }.getOrDefault("")
                 throw IllegalStateException("Overpass HTTP $status ${detail.take(120)}")
             }
 
-            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val response = activeConnection.inputStream.bufferedReader().use { it.readText() }
             val elements = JSONObject(response).optJSONArray("elements") ?: return emptyList()
             val venues = ArrayList<Venue>(elements.length())
             val seen = HashSet<String>()
