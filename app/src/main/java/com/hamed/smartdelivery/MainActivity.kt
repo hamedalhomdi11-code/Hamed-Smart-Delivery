@@ -8,6 +8,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.graphics.Color as AndroidColor
 import android.os.Looper
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -95,10 +96,15 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             trackingActive = true
         }
     }
+    val requestLocationPermissions: () -> Unit = {
+        val requested = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
+        locationPermissionLauncher.launch(requested.toTypedArray())
+    }
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
-            locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            requestLocationPermissions()
         } else if (trackingActive) {
             context.stopService(Intent(context, LocationTrackingService::class.java))
             trackingActive = false
@@ -275,7 +281,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         .color(AndroidColor.rgb(94, 240, 194))
                                         .width(6f)
                                 )
-                                routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم"
+                                routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
                             } else {
                                 routeStatus = "تعذر حساب المسار حالياً"
                             }
