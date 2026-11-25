@@ -140,9 +140,9 @@ def main():
         if value is None:
             return ""
         s = unicodedata.normalize("NFKC", str(value)).casefold().strip()
-        s = re.sub(r"[\\u064B-\\u065F\\u0670]", "", s)
+        s = re.sub(r"[\u064B-\u065F\u0670]", "", s)
         s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ى", "ي")
-        return re.sub(r"[^\\w]", "", s, flags=re.UNICODE)
+        return re.sub(r"[^\w]", "", s, flags=re.UNICODE)
 
     con.executescript(Path("database/003_brand_directory.sql").read_text(encoding="utf-8"))
     alias_lookup = {}
