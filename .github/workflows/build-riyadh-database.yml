@@ -1,0 +1,38 @@
+name: Build Riyadh places database
+on:
+  push:
+    paths:
+      - "database/**"
+      - ".github/workflows/build-riyadh-database.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install data tools
+        run: python -m pip install --upgrade pip pandas pyarrow
+      - name: Download Saudi POI source from Hugging Face
+        run: |
+          mkdir -p data/source data/output
+          curl -L --fail --retry 5 --retry-all-errors \
+            "https://huggingface.co/datasets/Bayanat-Labs/arab-world-places-atlas/resolve/main/data/places/places-SA.parquet?download=true" \
+            -o data/source/places-SA.parquet
+          test -s data/source/places-SA.parquet
+      - name: Build SQLite database
+        run: python database/build_riyadh_atlas.py data/source/places-SA.parquet data/output/hamed_smart_delivery_riyadh.sqlite
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamed-smart-delivery-riyadh-database
+          path: |
+            data/output/hamed_smart_delivery_riyadh.sqlite
+            data/output/hamed_smart_delivery_riyadh.sqlite.report.json
+          retention-days: 30
