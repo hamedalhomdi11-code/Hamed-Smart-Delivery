@@ -73,9 +73,17 @@ fun HamedApp() {
                             MapAction(Icons.Rounded.MyLocation) { }
                             MapAction(Icons.Rounded.Layers) { showDetails = !showDetails }
                         }
-                        AnimatedVisibility(visible = showDetails, modifier = Modifier.align(Alignment.Center), enter = fadeIn()+slideInVertically(), exit = fadeOut()+slideOutVertically()) {
-                            Surface(color = Panel.copy(alpha=.97f), shape = RoundedCornerShape(22.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Mint.copy(alpha=.4f))) {
-                                Column(Modifier.padding(18.dp)) { Text(if(english) "Map layers" else "طبقات الخريطة", color=Color.White, fontWeight=FontWeight.Bold); Text(if(english) "Live map provider will be connected in the maps phase." else "سيتم ربط مزود الخرائط الفعلي في مرحلة الخرائط.", color=Muted, fontSize=12.sp) }
+                        if (showDetails) {
+                            Surface(
+                                modifier = Modifier.align(Alignment.Center),
+                                color = Panel.copy(alpha = .97f),
+                                shape = RoundedCornerShape(22.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Mint.copy(alpha = .4f))
+                            ) {
+                                Column(Modifier.padding(18.dp)) {
+                                    Text(if (english) "Map layers" else "طبقات الخريطة", color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text(if (english) "Live map provider will be connected in the maps phase." else "سيتم ربط مزود الخرائط الفعلي في مرحلة الخرائط.", color = Muted, fontSize = 12.sp)
+                                }
                             }
                         }
                     }
