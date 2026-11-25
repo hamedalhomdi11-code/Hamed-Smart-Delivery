@@ -134,5 +134,6 @@ jobs:
             data/output/hamed_smart_delivery_riyadh.sqlite.report.json
             data/output/osm_sync.report.json
             data/output/overture_sync.report.json
+            data/output/wikidata_sync.report.json
             data/output/cross_source_duplicate_audit.json
           retention-days: 30
