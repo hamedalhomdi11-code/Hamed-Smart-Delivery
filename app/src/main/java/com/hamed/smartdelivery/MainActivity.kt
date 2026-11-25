@@ -190,6 +190,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(destination) { mutableStateOf("") }
     var routePoints by remember(destination) { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeSteps by remember(destination) { mutableStateOf<List<RouteStep>>(emptyList()) }
+    var currentStepIndex by remember(destination) { mutableIntStateOf(0) }
     var routeRequested by remember(destination) { mutableStateOf(false) }
     var ttsReady by remember { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
@@ -297,12 +299,25 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         .width(6f)
                                 )
                                 routePoints = route.points
+                                routeSteps = route.steps
+                                currentStepIndex = 0
                                 nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
                                 if (ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-next-turn")
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
                             } else {
                                 routeStatus = "تعذر حساب المسار حالياً"
                             }
+                        }
+                    }
+                    val currentStep = routeSteps.getOrNull(currentStepIndex)
+                    val maneuverPoint = currentStep?.location
+                    if (maneuverPoint != null) {
+                        val distanceToManeuver = FloatArray(1)
+                        Location.distanceBetween(location.latitude, location.longitude, maneuverPoint.latitude, maneuverPoint.longitude, distanceToManeuver)
+                        if (distanceToManeuver[0] <= 45f && currentStepIndex < routeSteps.lastIndex) {
+                            currentStepIndex += 1
+                            nextTurnInstruction = routeSteps.getOrNull(currentStepIndex)?.instruction ?: "وصلت إلى وجهتك"
+                            if (ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-turn-$currentStepIndex")
                         }
                     }
                     val currentRoute = routePoints
@@ -328,6 +343,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             .width(6f)
                                     )
                                     routePoints = updated.points
+                                    routeSteps = updated.steps
+                                    currentStepIndex = 0
                                     nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
                                     if (ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
