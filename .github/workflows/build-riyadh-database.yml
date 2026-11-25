@@ -46,6 +46,7 @@ jobs:
             nwr/craft=bakery,butcher,confectionery \
             -o data/source/riyadh-pois.osm.pbf --overwrite
           osmium export data/source/riyadh-pois.osm.pbf \
+            --add-unique-id=type_id \
             -o data/source/riyadh-pois.geojson --overwrite
           test -s data/source/riyadh-pois.geojson
       - name: Merge OpenStreetMap POIs into SQLite
