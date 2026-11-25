@@ -136,7 +136,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
         MaterialTheme(colorScheme = darkColorScheme(background = Night, surface = Panel, primary = Mint)) {
-            Column(Modifier.fillMaxSize().background(Night)) {
+            Column(Modifier.fillMaxSize().background(Night).safeDrawingPadding()) {
                 Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
