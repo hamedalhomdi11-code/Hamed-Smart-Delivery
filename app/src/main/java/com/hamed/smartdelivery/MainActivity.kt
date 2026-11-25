@@ -82,6 +82,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
+    var searchRequestId by remember { mutableIntStateOf(0) }
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -121,7 +122,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId)
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -137,6 +138,9 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         }
                     }
                     Dashboard(driverSnapshot, english) { command ->
+                        if (command == DriverCommand.StartSearch) {
+                            if (!hasLocationPermission) requestLocationPermissions() else searchRequestId += 1
+                        }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
                         if (transition.accepted) driverSnapshot = transition.snapshot
                     }
@@ -163,6 +167,21 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
 }
 
+private fun navigationLookAhead(latitude: Double, longitude: Double, bearingDegrees: Double, distanceMeters: Double): LatLng {
+    val earthRadius = 6371000.0
+    val angular = distanceMeters / earthRadius
+    val bearing = Math.toRadians(bearingDegrees)
+    val lat1 = Math.toRadians(latitude)
+    val lon1 = Math.toRadians(longitude)
+    val lat2 = kotlin.math.asin(kotlin.math.sin(lat1) * kotlin.math.cos(angular) +
+        kotlin.math.cos(lat1) * kotlin.math.sin(angular) * kotlin.math.cos(bearing))
+    val lon2 = lon1 + kotlin.math.atan2(
+        kotlin.math.sin(bearing) * kotlin.math.sin(angular) * kotlin.math.cos(lat1),
+        kotlin.math.cos(angular) - kotlin.math.sin(lat1) * kotlin.math.sin(lat2)
+    )
+    return LatLng(Math.toDegrees(lat2), Math.toDegrees(lon2))
+}
+
 @Composable
 private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(Color(0xFF0B1723)).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -181,18 +200,20 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var activeDestination by remember { mutableStateOf(destination) }
+    var lastProcessedSearch by remember { mutableIntStateOf(0) }
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
-    var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
-    var nextTurnInstruction by remember(destination) { mutableStateOf("") }
-    var routePoints by remember(destination) { mutableStateOf<List<LatLng>>(emptyList()) }
-    var routeSteps by remember(destination) { mutableStateOf<List<RouteStep>>(emptyList()) }
-    var currentStepIndex by remember(destination) { mutableIntStateOf(0) }
-    var routeRequested by remember(destination) { mutableStateOf(false) }
+    var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
+    var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
+    var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
+    var currentStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
+    var routeRequested by remember(activeDestination) { mutableStateOf(false) }
     var ttsReady by remember { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
     LaunchedEffect(ttsReady) {
@@ -230,12 +251,12 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 map.uiSettings.isAttributionEnabled = true
                 map.uiSettings.isLogoEnabled = true
                 map.cameraPosition = CameraPosition.Builder()
-                    .target(destination?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(24.7136, 46.6753))
-                    .zoom(if (destination == null) 13.5 else 15.0)
+                    .target(activeDestination?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(24.7136, 46.6753))
+                    .zoom(if (activeDestination == null) 13.5 else 15.0)
                     .tilt(if (perspective3D) 50.0 else 0.0)
                     .build()
-                if (destination != null) {
-                    map.addMarker(MarkerOptions().position(LatLng(destination.latitude, destination.longitude)).title("وجهة التوصيل"))
+                if (activeDestination != null) {
+                    map.addMarker(MarkerOptions().position(LatLng(activeDestination!!.latitude, activeDestination!!.longitude)).title("وجهة التوصيل"))
                 }
                 styleReady = true
             }
@@ -252,7 +273,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, destination, trackingActive, perspective3D) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, activeDestination, trackingActive, perspective3D) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
@@ -272,24 +293,52 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         existing.position = point
                     }
                     val previousCameraLocation = lastCameraLocation
-                    val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 15f))
+                    val navigating = activeDestination != null
+                    val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
                     if (shouldFollow) {
                         firstFix = false
-                        val bearing = if (location.hasBearing()) location.bearing.toDouble() else map.cameraPosition.bearing
+                        val bearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing.toDouble() else map.cameraPosition.bearing
                         map.animateCamera(
                             CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5).tilt(if (perspective3D) 50.0 else 0.0).bearing(bearing).build()
+                                CameraPosition.Builder().target(if (navigating) navigationLookAhead(location.latitude, location.longitude, bearing, 115.0) else point)
+                                    .zoom(if (navigating) 18.0 else 16.5)
+                                    .tilt(if (perspective3D || navigating) 58.0 else 0.0).bearing(bearing).build()
                             ),
-                            650
+                            850
                         )
                         lastCameraLocation = Location(location)
                     }
-                    if (destination != null && !routeRequested) {
+                    if (searchRequestId > lastProcessedSearch) {
+                        lastProcessedSearch = searchRequestId
+                        routeStatus = "جارٍ البحث الحي عن تجمعات المطاعم حولك"
+                        scope.launch {
+                            try {
+                                val clusters = withContext(Dispatchers.IO) {
+                                    RestaurantDiscoveryClient.findNearestClusters(location.latitude, location.longitude)
+                                }
+                                val best = clusters.firstOrNull()
+                                if (best == null) {
+                                    routeStatus = "لم تُعثر على مطاعم قريبة في بيانات الخريطة"
+                                } else {
+                                    clusters.take(8).forEach { cluster ->
+                                        map.addMarker(MarkerOptions().position(LatLng(cluster.latitude, cluster.longitude))
+                                            .title("تجمع مطاعم • ${cluster.restaurantCount}"))
+                                    }
+                                    activeDestination = DeliveryDestination(best.latitude, best.longitude)
+                                    routeRequested = false
+                                    routeStatus = "أفضل تجمع: ${best.restaurantCount} مطعم • ${String.format(Locale.US, "%.1f", best.distanceMeters / 1000.0)} كم"
+                                }
+                            } catch (error: Exception) {
+                                routeStatus = "تعذر البحث عن المطاعم: ${error.message ?: "تحقق من الإنترنت"}"
+                            }
+                        }
+                    }
+                    if (activeDestination != null && !routeRequested) {
                         routeRequested = true
                         routeStatus = "جارٍ حساب المسار"
                         scope.launch {
                             val route = withContext(Dispatchers.IO) {
-                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
+                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
                             }
                             if (route != null && route.points.size > 1) {
                                 routePolyline?.let { map.removePolyline(it) }
@@ -321,7 +370,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     val currentRoute = routePoints
-                    if (destination != null && currentRoute.size > 1) {
+                    if (activeDestination != null && currentRoute.size > 1) {
                         val nearestDistance = currentRoute.minOf { routePoint ->
                             val result = FloatArray(1)
                             Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
@@ -333,7 +382,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
                             scope.launch {
                                 val updated = withContext(Dispatchers.IO) {
-                                    OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
+                                    OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
                                 }
                                 if (updated != null && updated.points.size > 1) {
                                     routePolyline?.let { map.removePolyline(it) }
@@ -359,6 +408,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             try {
                 val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
                 locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+                // Use a cached fix immediately: discovery and route calculation must work while the driver is stationary.
+                locationManager.getLastKnownLocation(provider)?.let { listener.onLocationChanged(it) }
             } catch (_: SecurityException) {
                 // Permission may be revoked while the map is open.
             } catch (_: IllegalArgumentException) {
@@ -579,7 +630,7 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.2.0", color = Muted, fontSize = 10.sp)
+        Text("HAMED SMART DELIVERY • 0.4.0", color = Muted, fontSize = 10.sp)
     }
 }
 
