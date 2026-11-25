@@ -100,7 +100,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             Column(Modifier.fillMaxSize().background(Night)) {
                 Header(title, english) { english = !english }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    SmartMap(hasLocationPermission, initialDestination)
+                    SmartMap(hasLocationPermission, initialDestination, trackingActive)
                     Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                         MiniMetric(if (english) "Map" else "الخريطة", "OpenStreetMap", Icons.Rounded.Map)
@@ -161,7 +161,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -208,13 +208,14 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, hasLocationPermission, destination) {
+    DisposableEffect(mapLibreMap, hasLocationPermission, destination, trackingActive) {
         val map = mapLibreMap
         if (map == null || !hasLocationPermission) {
             onDispose { }
         } else {
             val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
             var firstFix = true
+            var lastCameraLocation: Location? = null
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
@@ -224,16 +225,18 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     } else {
                         existing.position = point
                     }
-                    if (firstFix) {
+                    val previousCameraLocation = lastCameraLocation
+                    val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 15f))
+                    if (shouldFollow) {
                         firstFix = false
-                        if (destination == null) {
-                            map.animateCamera(
-                                CameraUpdateFactory.newCameraPosition(
-                                    CameraPosition.Builder().target(point).zoom(16.0).tilt(50.0).build()
-                                ),
-                                700
-                            )
-                        }
+                        val bearing = if (location.hasBearing()) location.bearing.toDouble() else map.cameraPosition.bearing
+                        map.animateCamera(
+                            CameraUpdateFactory.newCameraPosition(
+                                CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5).tilt(50.0).bearing(bearing).build()
+                            ),
+                            650
+                        )
+                        lastCameraLocation = Location(location)
                     }
                     if (destination != null && !routeRequested) {
                         routeRequested = true
@@ -322,24 +325,6 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (Dr
         DriverMode.COMPLETED -> if (english) "Delivery completed" else "اكتمل التوصيل"
         DriverMode.SAFE_MODE -> if (english) "Safe mode" else "وضع الأمان"
     }
-    val primary = when (mode) {
-        DriverMode.IDLE, DriverMode.COMPLETED -> if (english) "FIND ORDERS" else "ابدأ البحث عن الطلبات"
-        DriverMode.SEARCHING -> if (english) "I GOT AN ORDER" else "وصلني طلب"
-        DriverMode.ORDER_RECEIVED -> if (english) "NAVIGATE TO RESTAURANT" else "توجه إلى المطعم"
-        DriverMode.TO_RESTAURANT -> if (english) "CONFIRM PICKUP" else "تأكيد استلام الطلب"
-        DriverMode.PICKUP -> if (english) "START CUSTOMER TRIP" else "انطلق إلى العميل"
-        DriverMode.TO_CUSTOMER -> if (english) "COMPLETE DELIVERY" else "تأكيد التسليم"
-        DriverMode.SAFE_MODE -> if (english) "RESUME" else "استئناف العمل"
-    }
-    val command = when (mode) {
-        DriverMode.IDLE, DriverMode.COMPLETED -> DriverCommand.StartSearch
-        DriverMode.SEARCHING -> DriverCommand.OrderReceived
-        DriverMode.ORDER_RECEIVED -> DriverCommand.NavigateToRestaurant
-        DriverMode.TO_RESTAURANT -> DriverCommand.ConfirmPickup
-        DriverMode.PICKUP -> DriverCommand.NavigateToCustomer
-        DriverMode.TO_CUSTOMER -> DriverCommand.CompleteDelivery
-        DriverMode.SAFE_MODE -> DriverCommand.ExitSafeMode
-    }
     Column(Modifier.fillMaxWidth().background(Color(0xFF0B1723)).padding(horizontal = 17.dp, vertical = 15.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -378,7 +363,6 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (Dr
                             DriverMode.IDLE, DriverMode.COMPLETED -> Icons.Rounded.Radar
                             DriverMode.SEARCHING -> Icons.Rounded.LocalShipping
                             DriverMode.TO_CUSTOMER, DriverMode.TO_RESTAURANT -> Icons.Rounded.Navigation
-                            DriverMode.TO_CUSTOMER -> Icons.Rounded.Navigation
                             DriverMode.SAFE_MODE -> Icons.Rounded.PlayArrow
                             else -> Icons.Rounded.CheckCircle
                         },
