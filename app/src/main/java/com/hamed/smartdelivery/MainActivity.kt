@@ -51,6 +51,10 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
+import com.hamed.smartdelivery.domain.DriverCommand
+import com.hamed.smartdelivery.domain.DriverMode
+import com.hamed.smartdelivery.domain.DriverReducer
+import com.hamed.smartdelivery.domain.DriverSnapshot
 
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
@@ -70,8 +74,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
-    var searching by remember { mutableStateOf(false) }
-    var hasOrder by remember { mutableStateOf(false) }
+    var driverSnapshot by remember { mutableStateOf(DriverSnapshot()) }
     var trackingActive by remember { mutableStateOf(false) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
@@ -122,10 +125,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         }
                     }
                 }
-                Dashboard(searching, hasOrder, english,
-                    { searching = !searching; if (!searching) hasOrder = false },
-                    { hasOrder = true; searching = false },
-                    { hasOrder = false; searching = true })
+                Dashboard(driverSnapshot, english) { command ->
+                    val transition = DriverReducer.reduce(driverSnapshot, command)
+                    if (transition.accepted) driverSnapshot = transition.snapshot
+                }
                 NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
                     val labels = if (english) listOf("Drive", "Orders", "Places", "Profile") else listOf("الملاحة", "الطلبات", "التجمعات", "حسابي")
                     val icons = listOf(Icons.Rounded.Navigation, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
@@ -205,7 +208,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, hasLocationPermission) {
+    DisposableEffect(mapLibreMap, hasLocationPermission, destination) {
         val map = mapLibreMap
         if (map == null || !hasLocationPermission) {
             onDispose { }
@@ -307,41 +310,98 @@ private fun MapAction(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 }
 
 @Composable
-private fun Dashboard(searching: Boolean, order: Boolean, english: Boolean, start: () -> Unit, gotOrder: () -> Unit, done: () -> Unit) {
+private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (DriverCommand) -> Unit) {
+    val mode = snapshot.mode
+    val title = when (mode) {
+        DriverMode.IDLE -> if (english) "Ready when you are" else "جاهز للانطلاق"
+        DriverMode.SEARCHING -> if (english) "Searching for orders" else "البحث عن الطلبات"
+        DriverMode.ORDER_RECEIVED -> if (english) "Order received" else "تم استلام الطلب"
+        DriverMode.TO_RESTAURANT -> if (english) "Heading to restaurant" else "في الطريق إلى المطعم"
+        DriverMode.PICKUP -> if (english) "Order picked up" else "تم استلام الطلب من المطعم"
+        DriverMode.TO_CUSTOMER -> if (english) "Heading to customer" else "في الطريق إلى العميل"
+        DriverMode.COMPLETED -> if (english) "Delivery completed" else "اكتمل التوصيل"
+        DriverMode.SAFE_MODE -> if (english) "Safe mode" else "وضع الأمان"
+    }
+    val primary = when (mode) {
+        DriverMode.IDLE, DriverMode.COMPLETED -> if (english) "FIND ORDERS" else "ابدأ البحث عن الطلبات"
+        DriverMode.SEARCHING -> if (english) "I GOT AN ORDER" else "وصلني طلب"
+        DriverMode.ORDER_RECEIVED -> if (english) "NAVIGATE TO RESTAURANT" else "توجه إلى المطعم"
+        DriverMode.TO_RESTAURANT -> if (english) "CONFIRM PICKUP" else "تأكيد استلام الطلب"
+        DriverMode.PICKUP -> if (english) "START CUSTOMER TRIP" else "انطلق إلى العميل"
+        DriverMode.TO_CUSTOMER -> if (english) "COMPLETE DELIVERY" else "تأكيد التسليم"
+        DriverMode.SAFE_MODE -> if (english) "RESUME" else "استئناف العمل"
+    }
+    val command = when (mode) {
+        DriverMode.IDLE, DriverMode.COMPLETED -> DriverCommand.StartSearch
+        DriverMode.SEARCHING -> DriverCommand.OrderReceived
+        DriverMode.ORDER_RECEIVED -> DriverCommand.NavigateToRestaurant
+        DriverMode.TO_RESTAURANT -> DriverCommand.ConfirmPickup
+        DriverMode.PICKUP -> DriverCommand.NavigateToCustomer
+        DriverMode.TO_CUSTOMER -> DriverCommand.CompleteDelivery
+        DriverMode.SAFE_MODE -> DriverCommand.ExitSafeMode
+    }
     Column(Modifier.fillMaxWidth().background(Color(0xFF0B1723)).padding(horizontal = 17.dp, vertical = 15.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(if (english) "DRIVER CONTROL" else "مركز تحكم المندوب", color = Muted, fontSize = 9.sp, letterSpacing = 1.4.sp)
-                Text(if (order) if (english) "Delivery in progress" else "طلب قيد التوصيل" else if (searching) if (english) "Searching mode" else "وضع البحث عن الطلبات" else if (english) "Ready when you are" else "جاهز للانطلاق", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
-            Surface(color = if (searching) Mint.copy(alpha = .13f) else Panel, shape = CircleShape) {
-                Text(if (searching) "● LIVE" else "● IDLE", color = if (searching) Mint else Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
+            Surface(color = if (mode == DriverMode.SEARCHING) Mint.copy(alpha = .13f) else Panel, shape = CircleShape) {
+                Text(mode.name.replace('_', ' '), color = if (mode == DriverMode.SEARCHING) Mint else Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
             }
         }
         Spacer(Modifier.height(13.dp))
-        AnimatedContent(targetState = order, label = "action") { isOrder ->
-            if (isOrder) {
-                Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Button(onClick = done, modifier = Modifier.weight(1f).height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Night), shape = RoundedCornerShape(17.dp)) {
-                        Icon(Icons.Rounded.CheckCircle, null); Spacer(Modifier.width(7.dp)); Text(if (english) "Complete delivery" else "إنهاء التوصيل", fontWeight = FontWeight.Bold)
-                    }
-                    OutlinedButton(onClick = {}, modifier = Modifier.height(54.dp), shape = RoundedCornerShape(17.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
-                        Icon(Icons.Rounded.Route, null)
-                    }
-                }
-            } else {
-                Button(onClick = if (searching) gotOrder else start, modifier = Modifier.fillMaxWidth().height(57.dp), shape = RoundedCornerShape(18.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (searching) Color(0xFFFFC66D) else Mint, contentColor = Night)) {
-                    Icon(if (searching) Icons.Rounded.LocalShipping else Icons.Rounded.Radar, null, modifier = Modifier.size(22.dp))
+        AnimatedContent(targetState = mode, label = "driver-mode") { currentMode ->
+            val currentCommand = when (currentMode) {
+                DriverMode.IDLE, DriverMode.COMPLETED -> DriverCommand.StartSearch
+                DriverMode.SEARCHING -> DriverCommand.OrderReceived
+                DriverMode.ORDER_RECEIVED -> DriverCommand.NavigateToRestaurant
+                DriverMode.TO_RESTAURANT -> DriverCommand.ConfirmPickup
+                DriverMode.PICKUP -> DriverCommand.NavigateToCustomer
+                DriverMode.TO_CUSTOMER -> DriverCommand.CompleteDelivery
+                DriverMode.SAFE_MODE -> DriverCommand.ExitSafeMode
+            }
+            val currentLabel = when (currentMode) {
+                DriverMode.IDLE, DriverMode.COMPLETED -> if (english) "FIND ORDERS" else "ابدأ البحث عن الطلبات"
+                DriverMode.SEARCHING -> if (english) "I GOT AN ORDER" else "وصلني طلب"
+                DriverMode.ORDER_RECEIVED -> if (english) "NAVIGATE TO RESTAURANT" else "توجه إلى المطعم"
+                DriverMode.TO_RESTAURANT -> if (english) "CONFIRM PICKUP" else "تأكيد استلام الطلب"
+                DriverMode.PICKUP -> if (english) "START CUSTOMER TRIP" else "انطلق إلى العميل"
+                DriverMode.TO_CUSTOMER -> if (english) "COMPLETE DELIVERY" else "تأكيد التسليم"
+                DriverMode.SAFE_MODE -> if (english) "RESUME" else "استئناف العمل"
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onCommand(currentCommand) }, modifier = Modifier.fillMaxWidth().height(57.dp), shape = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (currentMode == DriverMode.SEARCHING) Color(0xFFFFC66D) else Mint, contentColor = Night)) {
+                    Icon(
+                        when (currentMode) {
+                            DriverMode.IDLE, DriverMode.COMPLETED -> Icons.Rounded.Radar
+                            DriverMode.SEARCHING -> Icons.Rounded.LocalShipping
+                            DriverMode.TO_CUSTOMER, DriverMode.TO_RESTAURANT -> Icons.Rounded.Navigation
+                            DriverMode.TO_CUSTOMER -> Icons.Rounded.Navigation
+                            DriverMode.SAFE_MODE -> Icons.Rounded.PlayArrow
+                            else -> Icons.Rounded.CheckCircle
+                        },
+                        null,
+                        modifier = Modifier.size(22.dp)
+                    )
                     Spacer(Modifier.width(10.dp))
-                    Text(if (searching) if (english) "I GOT AN ORDER" else "وصلني طلب" else if (english) "FIND ORDERS" else "ابدأ البحث عن الطلبات", fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = .3.sp)
+                    Text(currentLabel, fontWeight = FontWeight.Black, fontSize = 14.sp, letterSpacing = .2.sp)
+                }
+                if (currentMode == DriverMode.SEARCHING) {
+                    OutlinedButton(onClick = { onCommand(DriverCommand.StopSearch) }, modifier = Modifier.fillMaxWidth().height(42.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Muted), shape = RoundedCornerShape(14.dp)) {
+                        Text(if (english) "STOP SEARCH" else "إيقاف البحث")
+                    }
                 }
             }
         }
         Spacer(Modifier.height(11.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(if (english) listOf("Fuel smart", "Restaurant AI", "Safe drive") else listOf("وقود بذكاء", "ذكاء المطاعم", "قيادة آمنة")) { label ->
-                Surface(color = Panel, shape = CircleShape) { Text("✦  $label", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) }
+                Surface(color = Panel, shape = CircleShape) {
+                    Text("✦  $label", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+                }
             }
         }
     }
