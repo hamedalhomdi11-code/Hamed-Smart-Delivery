@@ -1,6 +1,10 @@
 package com.hamed.smartdelivery
 
 import android.location.Location
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -17,56 +21,77 @@ data class RestaurantCluster(
 )
 
 /**
- * Best-effort public OpenStreetMap discovery.
- * Overpass is a shared community service, not a guaranteed production API.
+ * Best-effort OpenStreetMap discovery using independent Overpass hosting endpoints.
+ * These endpoints share OSM data; they improve endpoint availability, not source-data diversity.
  */
 object RestaurantDiscoveryClient {
     private data class Venue(val lat: Double, val lon: Double, val name: String)
 
-    private val radiiMeters = listOf(1000, 3000, 5000)
+    // Global endpoints plus the Asia regional mirror. Keep the fan-out bounded and respectful.
     private val endpoints = listOf(
         "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter"
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://ovp.dresel.systems/api-as/interpreter"
     )
 
-    fun findNearestClusters(latitude: Double, longitude: Double, radiusMeters: Int = 5000): List<RestaurantCluster> {
+    /**
+     * Runs all endpoints concurrently. Each non-empty response immediately publishes an updated
+     * cluster list; later responses are merged and de-duplicated, so the caller can route on the
+     * first useful result without waiting for slower mirrors.
+     */
+    suspend fun findNearestClustersStreaming(
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Int = 5000,
+        onUpdate: (List<RestaurantCluster>) -> Unit
+    ): List<RestaurantCluster> = coroutineScope {
         require(latitude.isFinite() && latitude in -90.0..90.0) { "إحداثيات خط العرض غير صالحة" }
         require(longitude.isFinite() && longitude in -180.0..180.0) { "إحداثيات خط الطول غير صالحة" }
 
-        val maximumRadius = radiusMeters.coerceIn(1000, 10000)
-        val radii = radiiMeters.filter { it <= maximumRadius }.ifEmpty { listOf(maximumRadius) }
-        var lastError: Exception? = null
-        var bestFound: List<RestaurantCluster> = emptyList()
-
-        for (radius in radii) {
-            var radiusResult: List<RestaurantCluster>? = null
-            for (endpoint in endpoints) {
-                try {
-                    val venues = requestVenues(endpoint, latitude, longitude, radius)
-                    radiusResult = cluster(venues, latitude, longitude, radius)
-                    break
-                } catch (error: Exception) {
-                    lastError = error
-                }
+        val radius = radiusMeters.coerceIn(1000, 10000)
+        val results = Channel<Pair<String, Result<List<Venue>>>>(Channel.UNLIMITED)
+        endpoints.forEach { endpoint ->
+            launch(Dispatchers.IO) {
+                val result = runCatching { requestVenues(endpoint, latitude, longitude, radius) }
+                results.send(endpoint to result)
             }
-            val found = radiusResult
-            if (found != null && found.isNotEmpty()) bestFound = found
-            if (found != null && (found.size >= 3 || radius == radii.last())) return if (found.isNotEmpty()) found else bestFound
         }
 
-        if (bestFound.isNotEmpty()) return bestFound
-        if (lastError != null) {
+        val merged = LinkedHashMap<String, Venue>()
+        var best: List<RestaurantCluster> = emptyList()
+        var lastError: Throwable? = null
+
+        repeat(endpoints.size) {
+            val (endpoint, result) = results.receive()
+            result.fold(
+                onSuccess = { venues ->
+                    venues.forEach { venue ->
+                        val key = "${venue.name.trim().lowercase()}:${(venue.lat * 100000).roundToInt()}:${(venue.lon * 100000).roundToInt()}"
+                        merged.putIfAbsent(key, venue)
+                    }
+                    val updated = cluster(merged.values.toList(), latitude, longitude, radius)
+                    if (updated.isNotEmpty()) {
+                        best = updated
+                        onUpdate(updated)
+                    }
+                },
+                onFailure = { error -> lastError = error }
+            )
+        }
+        results.close()
+
+        if (best.isEmpty() && lastError != null) {
             throw IllegalStateException(
-                "تعذر الاتصال بمصادر بيانات المطاعم بعد تجربة نطاقات 1 و3 و5 كم. تحقق من الإنترنت أو VPN ثم أعد المحاولة.",
+                "تعذر الوصول إلى مصادر بيانات المطاعم المتاحة حالياً.",
                 lastError
             )
         }
-        return emptyList()
+        best
     }
 
     private fun requestVenues(endpoint: String, latitude: Double, longitude: Double, radiusMeters: Int): List<Venue> {
         val query = """
-            [out:json][timeout:20];
+            [out:json][timeout:12];
             (
               node["amenity"~"^(restaurant|fast_food|cafe|food_court)$"](around:$radiusMeters,$latitude,$longitude);
               way["amenity"~"^(restaurant|fast_food|cafe|food_court)$"](around:$radiusMeters,$latitude,$longitude);
@@ -78,25 +103,20 @@ object RestaurantDiscoveryClient {
         try {
             connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = 10000
-                readTimeout = 22000
+                connectTimeout = 5000
+                readTimeout = 12000
                 doOutput = true
                 useCaches = false
-                setRequestProperty("User-Agent", "HamedSmartDelivery/0.4.1 (Android; OSM Overpass client)")
+                setRequestProperty("User-Agent", "HamedSmartDelivery/0.4.2 (Android; OSM Overpass client)")
                 setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                 setRequestProperty("Accept", "application/json")
             }
-            val activeConnection = connection ?: error("تعذر إنشاء اتصال بمصدر المطاعم")
+            val activeConnection = connection
             val body = "data=" + URLEncoder.encode(query, "UTF-8")
             activeConnection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
 
             val status = activeConnection.responseCode
-            if (status !in 200..299) {
-                val detail = runCatching {
-                    (activeConnection.errorStream ?: activeConnection.inputStream).bufferedReader().use { it.readText().take(300) }
-                }.getOrDefault("")
-                throw IllegalStateException("Overpass HTTP $status ${detail.take(120)}")
-            }
+            if (status !in 200..299) throw IllegalStateException("HTTP $status from restaurant data endpoint")
 
             val response = activeConnection.inputStream.bufferedReader().use { it.readText() }
             val elements = JSONObject(response).optJSONArray("elements") ?: return emptyList()
@@ -110,7 +130,7 @@ object RestaurantDiscoveryClient {
                 if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) continue
                 val tags = item.optJSONObject("tags")
                 val name = tags?.optString("name").orEmpty().ifBlank { tags?.optString("brand").orEmpty() }
-                val key = "${name.trim().lowercase()}:${(lat * 10000).roundToInt()}:${(lon * 10000).roundToInt()}"
+                val key = "${name.trim().lowercase()}:${(lat * 100000).roundToInt()}:${(lon * 100000).roundToInt()}"
                 if (seen.add(key)) venues.add(Venue(lat, lon, name))
             }
             return venues
