@@ -9,6 +9,13 @@ This folder defines the database contract. It does not yet contain a complete ve
 1. `001_riyadh_places.sql`: data sources, business branches, observations and active Riyadh places view.
 2. `002_delivery_platform_orders.sql`: delivery platforms, platform-to-branch listing links, privacy-minimized order observations and recent order activity view. HungerStation is registered for Android share ingestion; this does not create a private API integration or fetch orders automatically.
 
+## Brand index and branch hierarchy
+
+- `003_brand_directory.sql` creates a separate `brands` registry, `brand_aliases`, and `brand_place_links` so chain names are not confused with physical branches.
+- `riyadh_brand_index.csv` seeds known chain names and Arabic/English aliases (including Kudu, McDonald's, Bayt Al Shawarma, Rosmar and Fawwar Al Taif).
+- The build script links a physical place to a brand only when its source brand name or full place name exactly matches a normalized registered alias. Unmatched branches remain unlinked; no branches or coordinates are fabricated.
+- The report records brand counts and the number of linked branches. This is an initial index, not a complete catalogue of every chain in Riyadh.
+
 ## Scope
 - Riyadh branches of restaurants, supermarkets, hypermarkets, groceries, pharmacies, cafes and bakeries.
 - One record per physical branch, including coordinates, district, category, brand, source, license/attribution, confidence and verification timestamps.
