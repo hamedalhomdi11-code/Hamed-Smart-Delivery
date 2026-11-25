@@ -2,6 +2,7 @@ package com.hamed.smartdelivery
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -56,6 +57,7 @@ fun HamedApp() {
     val context = LocalContext.current
     var searching by remember { mutableStateOf(false) }
     var hasOrder by remember { mutableStateOf(false) }
+    var trackingActive by remember { mutableStateOf(false) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
     var hasLocationPermission by remember {
@@ -69,6 +71,10 @@ fun HamedApp() {
     ) { permissions ->
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (hasLocationPermission) {
+            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+            trackingActive = true
+        }
     }
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
@@ -78,13 +84,19 @@ fun HamedApp() {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     SmartMap(hasLocationPermission)
                     Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        MiniMetric("GPS", if (hasLocationPermission) if (english) "Permission granted" else "تم السماح بالموقع" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
+                        MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                         MiniMetric(if (english) "Map" else "الخريطة", "OpenStreetMap", Icons.Rounded.Map)
                     }
                     Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         MapAction(Icons.Rounded.MyLocation) {
                             if (!hasLocationPermission) {
                                 locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                            } else if (trackingActive) {
+                                context.stopService(Intent(context, LocationTrackingService::class.java))
+                                trackingActive = false
+                            } else {
+                                ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                                trackingActive = true
                             }
                         }
                         MapAction(Icons.Rounded.Layers) { }
