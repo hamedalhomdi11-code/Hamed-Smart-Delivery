@@ -2,7 +2,7 @@
 
 **حامد سمارت دليفري** — Android-first smart courier navigation and dispatch assistant.
 
-> Current development status: the original driver-first Arabic/English interface is retained. The map now uses MapLibre Native with an OpenFreeMap style and a 50-degree tilted camera. The app requests foreground location permission, starts an explicit user-controlled Android location foreground service, accepts shared coordinate links from other apps, and can draw a driving route using OSRM. This is an integration milestone, not yet a production-ready navigation release: spoken turn guidance, route rerouting, persistent trip/restaurant storage, real restaurant-demand feeds, optional remote-control backend, device QA and protected release signing remain.
+> Current development status: the original driver-first Arabic/English interface is retained. The map now uses MapLibre Native with an OpenFreeMap style and a 50-degree tilted camera. The app requests foreground location permission, starts an explicit user-controlled Android location foreground service, accepts shared coordinate links from other apps, and can draw a driving route using OSRM. This is an integration milestone, not yet a production-ready navigation release: spoken turn guidance, route rerouting, persistent trip/restaurant storage, live restaurant discovery/demand feeds, optional remote-control backend, device QA and protected release signing remain.
 
 ## Product principles
 - Arabic-first with English toggle; RTL/LTR layout.
