@@ -11,6 +11,11 @@
 - Shared text-link parsing for coordinate pairs and common Google Maps coordinate URL formats.
 - OSRM driving route preview rendered as a map polyline when a destination is shared and a GPS fix is available.
 
+## Database foundation added (2026-11-26)
+- Added `database/001_riyadh_places.sql` defining SQLite tables for source provenance, Riyadh business branches and observations, with validation constraints and indexes.
+- Added `database/README.md` defining SQLite import/export expectations, licensing checks, deduplication and the rule that public branch data is not live delivery-order data.
+- This is a schema foundation only: it is not a populated Riyadh database and is not yet connected to Android Room or the search flow.
+
 ## Remaining before a production handoff
 1. Add robust destination resolution for short links and address-only shares; add safe geocoding and user confirmation.
 2. Add route steps, voice guidance, route progress, off-route detection and automatic rerouting.
