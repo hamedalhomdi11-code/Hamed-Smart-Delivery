@@ -18,7 +18,11 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.nchc.org.tw/api/interpreter",
+]
 SOURCE_ID = "openstreetmap_riyadh"
 SOURCE_URL = "https://www.openstreetmap.org/copyright"
 USER_AGENT = "HAMED-SMART-DELIVERY/1.0 (Riyadh POI database sync)"
@@ -26,8 +30,8 @@ QUERY = """
 [out:json][timeout:180];
 area["name"="Riyadh"]["boundary"="administrative"]->.riyadh;
 (
-  nwr["amenity"~"^(restaurant|fast_food|cafe|ice_cream|food_court|bar)$"](area.riyadh);
-  nwr["shop"](area.riyadh);
+  nwr["amenity"~"^(restaurant|fast_food|cafe|ice_cream|food_court)$"](area.riyadh);
+  nwr["shop"~"^(supermarket|convenience|bakery|greengrocer|general|mall|department_store)$"](area.riyadh);
   nwr["craft"~"^(bakery|butcher|confectionery)$"](area.riyadh);
 );
 out center tags;
@@ -55,12 +59,23 @@ def category(tags):
 
 def fetch():
     body = urlencode({"data": QUERY}).encode()
-    req = Request(OVERPASS, data=body, headers={
-        "User-Agent": USER_AGENT,
-        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-    })
-    with urlopen(req, timeout=240) as response:
-        return json.loads(response.read().decode("utf-8"))
+    errors = []
+    for endpoint in OVERPASS_ENDPOINTS:
+        for attempt in range(3):
+            req = Request(endpoint, data=body, headers={
+                "User-Agent": USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+            })
+            try:
+                with urlopen(req, timeout=240) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                    if "elements" not in payload:
+                        raise ValueError("Overpass response has no elements array")
+                    return payload
+            except Exception as exc:
+                errors.append(f"{endpoint} attempt {attempt + 1}: {type(exc).__name__}: {exc}")
+                time.sleep(2 ** attempt)
+    raise RuntimeError("All Overpass endpoints failed: " + " | ".join(errors))
 
 def main():
     if len(sys.argv) != 2:
