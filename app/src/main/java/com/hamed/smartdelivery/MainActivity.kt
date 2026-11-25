@@ -222,8 +222,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    LaunchedEffect(mapLibreMap, perspective3D) {
-        mapLibreMap?.let { map ->
+    LaunchedEffect(mapLibreMap, styleReady, perspective3D) {
+        if (styleReady) mapLibreMap?.let { map ->
             val current = map.cameraPosition
             map.animateCamera(CameraUpdateFactory.newCameraPosition(
                 CameraPosition.Builder().target(current.target).zoom(current.zoom).bearing(current.bearing)
@@ -232,7 +232,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, destination, trackingActive) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, destination, trackingActive, perspective3D) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
@@ -256,7 +256,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         val bearing = if (location.hasBearing()) location.bearing.toDouble() else map.cameraPosition.bearing
                         map.animateCamera(
                             CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5).tilt(50.0).bearing(bearing).build()
+                                CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5).tilt(if (perspective3D) 50.0 else 0.0).bearing(bearing).build()
                             ),
                             650
                         )
