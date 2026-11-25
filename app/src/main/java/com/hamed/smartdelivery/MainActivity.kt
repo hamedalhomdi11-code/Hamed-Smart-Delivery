@@ -273,7 +273,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, activeDestination, trackingActive, perspective3D) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, activeDestination, trackingActive, perspective3D, searchRequestId) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
