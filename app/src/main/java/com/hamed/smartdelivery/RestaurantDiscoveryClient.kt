@@ -36,6 +36,7 @@ object RestaurantDiscoveryClient {
         val maximumRadius = radiusMeters.coerceIn(1000, 10000)
         val radii = radiiMeters.filter { it <= maximumRadius }.ifEmpty { listOf(maximumRadius) }
         var lastError: Exception? = null
+        var bestFound: List<RestaurantCluster> = emptyList()
 
         for (radius in radii) {
             var radiusResult: List<RestaurantCluster>? = null
@@ -49,9 +50,11 @@ object RestaurantDiscoveryClient {
                 }
             }
             val found = radiusResult
-            if (found != null && (found.size >= 3 || radius == radii.last())) return found
+            if (found != null && found.isNotEmpty()) bestFound = found
+            if (found != null && (found.size >= 3 || radius == radii.last())) return if (found.isNotEmpty()) found else bestFound
         }
 
+        if (bestFound.isNotEmpty()) return bestFound
         if (lastError != null) {
             throw IllegalStateException(
                 "تعذر الاتصال بمصادر بيانات المطاعم بعد تجربة نطاقات 1 و3 و5 كم. تحقق من الإنترنت أو VPN ثم أعد المحاولة.",
