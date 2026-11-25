@@ -26,6 +26,19 @@ The order schema intentionally excludes customer names, phone numbers, pickup/de
 3. Ministry of Commerce Open Data: https://mc.gov.sa/en/OpenData/pages/default.aspx . Confirm API access, fields and usage terms before synchronization.
 4. OpenStreetMap: comply with ODbL attribution and share-alike obligations. Overpass mirrors are not independent datasets.
 
+## Data ingestion scripts
+
+- `sync_riyadh_osm.py`: fetches mapped restaurant, cafe, grocery, supermarket, pharmacy and other shop features inside the Riyadh administrative area from OpenStreetMap via Overpass. It inserts/updates records in the existing SQLite schema, stores OSM element IDs and ODbL attribution, and prints a record-count summary.
+- `import_riyadh_csv.py`: imports the Riyadh restaurant/cafe CSV format from the NearBite public dataset. Verify the upstream dataset's reuse terms before redistribution.
+
+Run after applying the SQL migrations:
+```bash
+python database/sync_riyadh_osm.py path/to/hamed_smart_delivery.sqlite
+python database/import_riyadh_csv.py path/to/hamed_smart_delivery.sqlite path/to/Riyadh2.csv
+``
+
+The sync scripts are committed, but they are not proof that the live app database has been populated. A database file and runtime access to the target environment are required to execute and verify ingestion. OpenStreetMap coverage depends on mapped features and is not guaranteed to include every business.
+
 ## Import/export contract
 - Accept only SQLite files matching this schema version; validate before import.
 - Validate Riyadh coverage, coordinates, required provenance and categories.
