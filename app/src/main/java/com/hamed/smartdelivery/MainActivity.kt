@@ -83,6 +83,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
     var searchRequestId by remember { mutableIntStateOf(0) }
+    var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -97,6 +98,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
             trackingActive = true
+            if (pendingSearchAfterPermission) {
+                searchRequestId += 1
+                pendingSearchAfterPermission = false
+            }
         }
     }
     val requestLocationPermissions: () -> Unit = {
@@ -139,7 +144,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                     }
                     Dashboard(driverSnapshot, english) { command ->
                         if (command == DriverCommand.StartSearch) {
-                            if (!hasLocationPermission) requestLocationPermissions() else searchRequestId += 1
+                            if (!hasLocationPermission) {
+                                pendingSearchAfterPermission = true
+                                requestLocationPermissions()
+                            } else searchRequestId += 1
                         }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
                         if (transition.accepted) driverSnapshot = transition.snapshot
@@ -409,7 +417,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
                 locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
                 // Use a cached fix immediately: discovery and route calculation must work while the driver is stationary.
-                locationManager.getLastKnownLocation(provider)?.let { listener.onLocationChanged(it) }
+                (locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))?.let { listener.onLocationChanged(it) }
             } catch (_: SecurityException) {
                 // Permission may be revoked while the map is open.
             } catch (_: IllegalArgumentException) {
