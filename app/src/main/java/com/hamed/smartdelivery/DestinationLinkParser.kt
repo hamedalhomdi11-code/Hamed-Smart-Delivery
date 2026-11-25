@@ -1,6 +1,7 @@
 package com.hamed.smartdelivery
 
-import android.net.Uri
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 
 data class DeliveryDestination(val latitude: Double, val longitude: Double)
 
@@ -13,7 +14,7 @@ object DestinationLinkParser {
 
     fun parse(sharedText: String?): DeliveryDestination? {
         if (sharedText.isNullOrBlank()) return null
-        val decoded = Uri.decode(sharedText)
+        val decoded = URLDecoder.decode(sharedText.replace("+", "%2B"), StandardCharsets.UTF_8)
         for (pattern in coordinatePatterns) {
             val match = pattern.find(decoded) ?: continue
             val latitude = match.groupValues[1].toDoubleOrNull() ?: continue
