@@ -54,15 +54,20 @@ jobs:
           # The importer retains each source object ID and skips unnamed features.
           osmium tags-filter data/source/riyadh.osm.pbf \
             nwr/shop \
-            nwr/amenity=restaurant,fast_food,cafe,ice_cream,food_court,pharmacy,bank,atm,clinic,hospital,doctors,dentist,school,university,post_office,parcel_locker,marketplace,community_centre,library,fuel,charging_station,parking,bus_station \
+            nwr/amenity=restaurant,fast_food,cafe,ice_cream,food_court,pharmacy,bank,atm,clinic,hospital,doctors,dentist,school,university,college,kindergarten,language_school,driving_school,post_office,parcel_locker,marketplace,community_centre,library,fuel,charging_station,parking,bus_station,car_wash,car_rental,car_sharing,car_repair,veterinary,childcare,cinema,theatre,arts_centre,events_venue,nightclub,bar,pub,place_of_worship,police,fire_station,courthouse,prison,social_facility,shelter,toilets,drinking_water,public_bath,recycling,waste_disposal,animal_shelter,studio,conference_centre,exhibition_centre,public_building \
             nwr/healthcare \
-            nwr/tourism=hotel,guest_house,attraction,museum,information,viewpoint \
-            nwr/leisure=fitness_centre,sports_centre,stadium,swimming_pool,park \
-            nwr/craft=bakery,butcher,confectionery \
-            nwr/office=company,government,insurance,lawyer,estate_agent,travel_agent \
+            nwr/education \
+            nwr/tourism=hotel,motel,guest_house,hostel,attraction,museum,artwork,information,viewpoint,theme_park,zoo,aquarium,gallery,apartment \
+            nwr/leisure=fitness_centre,sports_centre,stadium,swimming_pool,park,garden,playground,pitch,golf_course,water_park,escape_game,amusement_arcade,bowling_alley,miniature_golf,marina \
+            nwr/sport \
+            nwr/craft \
+            nwr/office \
             nwr/public_transport=station,platform,stop_position \
-            nwr/highway=bus_stop \
+            nwr/highway=bus_stop,services \
             nwr/railway=station,halt \
+            nwr/emergency \
+            nwr/aeroway=aerodrome,terminal \
+            nwr/club \
             -o data/source/riyadh-pois.osm.pbf --overwrite
           osmium export data/source/riyadh-pois.osm.pbf \
             --add-unique-id=type_id \
