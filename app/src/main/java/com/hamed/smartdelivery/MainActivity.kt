@@ -3,6 +3,10 @@ package com.hamed.smartdelivery
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Looper
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,16 +31,21 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
-import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import org.maplibre.android.MapLibre
+import org.maplibre.android.annotations.Marker
+import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
 
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
@@ -47,7 +56,7 @@ private val Muted = Color(0xFF8EA5B8)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Configuration.getInstance().userAgentValue = packageName
+        MapLibre.getInstance(this)
         setContent { HamedApp() }
     }
 }
@@ -145,33 +154,90 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 @Composable
 private fun SmartMap(hasLocationPermission: Boolean) {
     val context = LocalContext.current
-    val mapView = remember(hasLocationPermission) {
-        MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
-            setMultiTouchControls(true)
-            setBuiltInZoomControls(false)
-            minZoomLevel = 4.0
-            maxZoomLevel = 20.0
-            controller.setZoom(13.5)
-            controller.setCenter(GeoPoint(24.7136, 46.6753))
-            if (hasLocationPermission) {
-                val locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), this)
-                locationOverlay.enableMyLocation()
-                overlays.add(locationOverlay)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    var userMarker by remember { mutableStateOf<Marker?>(null) }
+    val mapView = remember {
+        MapView(context).apply { onCreate(null) }
+    }
+
+    DisposableEffect(mapView, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mapView.onDestroy()
+        }
+    }
+
+    LaunchedEffect(mapView) {
+        mapView.getMapAsync { map ->
+            mapLibreMap = map
+            map.setStyle("https://tiles.openfreemap.org/styles/liberty") {
+                map.uiSettings.isAttributionEnabled = true
+                map.uiSettings.isLogoEnabled = true
+                map.cameraPosition = CameraPosition.Builder()
+                    .target(LatLng(24.7136, 46.6753))
+                    .zoom(13.5)
+                    .tilt(50.0)
+                    .build()
             }
         }
     }
-    DisposableEffect(mapView) {
-        mapView.onResume()
-        onDispose {
-            mapView.onPause()
-            mapView.onDetach()
+
+    DisposableEffect(mapLibreMap, hasLocationPermission) {
+        val map = mapLibreMap
+        if (map == null || !hasLocationPermission) {
+            onDispose { }
+        } else {
+            val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+            var firstFix = true
+            val listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    val point = LatLng(location.latitude, location.longitude)
+                    val existing = userMarker
+                    if (existing == null) {
+                        userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
+                    } else {
+                        existing.position = point
+                    }
+                    if (firstFix) {
+                        firstFix = false
+                        map.animateCamera(
+                            CameraUpdateFactory.newCameraPosition(
+                                CameraPosition.Builder().target(point).zoom(16.0).tilt(50.0).build()
+                            ),
+                            700
+                        )
+                    }
+                }
+            }
+            try {
+                val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
+                locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+            } catch (_: SecurityException) {
+                // Permission may be revoked while the map is open.
+            } catch (_: IllegalArgumentException) {
+                // No location provider is available on this device.
+            }
+            onDispose {
+                try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
+            }
         }
     }
+
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { mapView },
-        update = { it.invalidate() }
+        update = { }
     )
 }
 
