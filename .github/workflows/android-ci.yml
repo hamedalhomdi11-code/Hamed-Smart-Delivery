@@ -46,27 +46,47 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Build and test
+      - name: Build and test debug APK
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
-      - name: Verify APK and record signing certificate
+      - name: Verify debug APK
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-signature.txt
-          if grep -qi "d3b2bf8543613c14234bfc4a28d21b96631c8320ceeea666fba43b483afb6657" apk-signature.txt; then
-            echo "UPDATE_COMPATIBLE_WITH_PREVIOUS_APK=true" | tee -a apk-signature.txt
-          else
-            echo "::warning::APK signing certificate differs from the previously delivered APK; Android will reject an in-place update."
-            echo "UPDATE_COMPATIBLE_WITH_PREVIOUS_APK=false" | tee -a apk-signature.txt
-          fi
-      - name: Upload APK and signature report
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-debug-signature.txt
+      - name: Configure permanent 0.4.2 release signing key
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hamed-release.jks"
+          chmod 600 "$RUNNER_TEMP/hamed-release.jks"
+      - name: Build APK signed with the permanent 0.4.2 key
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+        env:
+          HAMED_KEYSTORE_FILE: ${{ runner.temp }}/hamed-release.jks
+          HAMED_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HAMED_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          HAMED_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon :app:assembleRelease
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-release-signature.txt
+      - name: Explain release signing setup
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 == '' || secrets.ANDROID_KEYSTORE_PASSWORD == '' || secrets.ANDROID_KEY_ALIAS == '' || secrets.ANDROID_KEY_PASSWORD == '' }}
+        run: |
+          echo "::warning::Release APK not produced. Add the four permanent 0.4.2 signing secrets in repository Settings > Secrets and variables > Actions."
+      - name: Upload APKs and signature reports
         uses: actions/upload-artifact@v4
         with:
-          name: hamed-smart-delivery-debug-apk
+          name: hamed-smart-delivery-0.4.2-build
           path: |
             app/build/outputs/apk/debug/app-debug.apk
-            apk-signature.txt
-          if-no-files-found: error
+            app/build/outputs/apk/release/app-release.apk
+            apk-debug-signature.txt
+            apk-release-signature.txt
+          if-no-files-found: warn
       - name: Run Android emulator smoke tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
