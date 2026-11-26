@@ -42,9 +42,15 @@ jobs:
             data/output/hamed_smart_delivery_riyadh.sqlite \
             data/source/overture-riyadh-places.parquet | tee data/output/overture_sync.report.json
       - name: Import additional Wikidata points of interest
+        continue-on-error: true
         run: |
           set -o pipefail
-          python database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riyadh.sqlite | tee data/output/wikidata_sync.report.json
+          if python database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riyadh.sqlite | tee data/output/wikidata_sync.report.json; then
+            echo "Wikidata import completed."
+          else
+            printf '%s\\n' '{"status":"unavailable","source":"Wikidata Query Service","error":"Wikidata request failed; optional source skipped so the other licensed sources and derived clusters can still be built."}' > data/output/wikidata_sync.report.json
+            echo "::warning::Wikidata unavailable; continuing with Overture and OpenStreetMap."
+          fi
       - name: Download and extract current OpenStreetMap GCC data
         run: |
           curl -L --fail --retry 5 --retry-all-errors \
@@ -110,6 +116,31 @@ jobs:
           con.close()
           print(json.dumps(report, ensure_ascii=False))
           PY
+      - name: Derive restaurant density clusters and centroid coordinates
+        run: |
+          python database/derive_riyadh_restaurant_clusters.py \\
+            data/output/hamed_smart_delivery_riyadh.sqlite \\
+            data/output/restaurant_clusters.report.json
+          python - <<'PY'
+          import json, sqlite3
+          db = "data/output/hamed_smart_delivery_riyadh.sqlite"
+          report_path = db + ".report.json"
+          report = json.load(open(report_path, encoding="utf-8"))
+          clusters = json.load(open("data/output/restaurant_clusters.report.json", encoding="utf-8"))
+          con = sqlite3.connect(db)
+          report["restaurant_clusters"] = {
+              k: v for k, v in clusters.items() if k != "clusters"
+          }
+          report["restaurant_cluster_count"] = con.execute(
+              "SELECT COUNT(*) FROM restaurant_clusters"
+          ).fetchone()[0]
+          report["restaurant_cluster_member_count"] = con.execute(
+              "SELECT COUNT(*) FROM restaurant_cluster_members"
+          ).fetchone()[0]
+          json.dump(report, open(report_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          con.close()
+          print(json.dumps(report["restaurant_clusters"], ensure_ascii=False))
+          PY
       - name: Audit possible cross-source duplicate locations
         run: |
           python database/audit_riyadh_cross_source.py \
@@ -136,5 +167,6 @@ jobs:
             data/output/osm_sync.report.json
             data/output/overture_sync.report.json
             data/output/wikidata_sync.report.json
+            data/output/restaurant_clusters.report.json
             data/output/cross_source_duplicate_audit.json
           retention-days: 30
