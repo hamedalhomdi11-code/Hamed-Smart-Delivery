@@ -4,6 +4,15 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val hamedKeystoreFile = System.getenv("HAMED_KEYSTORE_FILE")
+val hamedKeystorePassword = System.getenv("HAMED_KEYSTORE_PASSWORD")
+val hamedKeyAlias = System.getenv("HAMED_KEY_ALIAS")
+val hamedKeyPassword = System.getenv("HAMED_KEY_PASSWORD")
+val hasHamedReleaseKey = !hamedKeystoreFile.isNullOrBlank() &&
+    !hamedKeystorePassword.isNullOrBlank() &&
+    !hamedKeyAlias.isNullOrBlank() &&
+    !hamedKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.hamed.smartdelivery"
     compileSdk = 35
@@ -14,6 +23,24 @@ android {
         versionCode = 6
         versionName = "0.4.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        if (hasHamedReleaseKey) {
+            create("hamedRelease") {
+                storeFile = file(hamedKeystoreFile!!)
+                storePassword = hamedKeystorePassword!!
+                keyAlias = hamedKeyAlias!!
+                keyPassword = hamedKeyPassword!!
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (hasHamedReleaseKey) {
+                signingConfig = signingConfigs.getByName("hamedRelease")
+            }
+        }
     }
     buildFeatures { compose = true }
     compileOptions {
