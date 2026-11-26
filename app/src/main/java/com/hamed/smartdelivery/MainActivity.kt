@@ -115,6 +115,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
+    var mapExpanded by remember { mutableStateOf(false) }
     var searchRequestId by remember { mutableIntStateOf(0) }
     var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
@@ -162,10 +163,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
         MaterialTheme(colorScheme = darkColorScheme(background = Night, surface = Panel, primary = Mint)) {
             Column(Modifier.fillMaxSize().background(Night).safeDrawingPadding()) {
-                Header(title, english) { english = !english }
+                if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, mapExpanded) { mapExpanded = !mapExpanded }
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -173,6 +174,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MapAction(Icons.Rounded.MyLocation, toggleTracking)
                             MapAction(Icons.Rounded.Layers) { perspective3D = !perspective3D }
+                            MapAction(if (mapExpanded) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen) { mapExpanded = !mapExpanded }
                         }
                         Column(Modifier.align(Alignment.BottomEnd).padding(14.dp), horizontalAlignment = Alignment.End) {
                             Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
@@ -180,7 +182,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    Dashboard(driverSnapshot, english) { command ->
+                    if (!mapExpanded) Dashboard(driverSnapshot, english) { command ->
                         if (command == DriverCommand.StartSearch) {
                             if (!hasLocationPermission) {
                                 pendingSearchAfterPermission = true
@@ -199,7 +201,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         }
                     }
                 }
-                NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
+                if (!mapExpanded) NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
                     val labels = if (english) listOf("Drive", "Orders", "Places", "Profile") else listOf("الملاحة", "الطلبات", "التجمعات", "حسابي")
                     val icons = listOf(Icons.Rounded.Navigation, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
                     labels.forEachIndexed { i, label ->
@@ -259,7 +261,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, mapExpanded: Boolean, onToggleMapExpanded: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -276,6 +278,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
     var currentStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
+    var showMapProviderDialog by remember { mutableStateOf(false) }
+    var mapProviderNotice by remember { mutableStateOf("") }
     var ttsReady by remember { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
     LaunchedEffect(ttsReady) {
@@ -687,13 +691,39 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     }
                 }
                 OutlinedButton(
-                    onClick = { openGoogleMaps(context, activeDestination!!) },
+                    onClick = { showMapProviderDialog = true },
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                 ) {
                     Icon(Icons.Rounded.Map, null)
                     Spacer(Modifier.width(5.dp))
-                    Text("التوجه إلى Google Maps")
+                    Text("تبديل تطبيق الخريطة")
                 }
+            }
+        }
+        if (showMapProviderDialog && activeDestination != null) {
+            AlertDialog(
+                onDismissRequest = { showMapProviderDialog = false },
+                title = { Text("اختيار تطبيق الخريطة", color = Color.White) },
+                text = { Text("اختر طريقة عرض هذا المسار. يمكنك إبقاء الخريطة المحلية أو فتح الوجهة في Google Maps.", color = Muted) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showMapProviderDialog = false
+                        openGoogleMaps(context, activeDestination!!)
+                    }) { Text("فتح Google Maps", color = Mint) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showMapProviderDialog = false
+                        mapProviderNotice = "الخريطة المحلية هي المحددة"
+                    }) { Text("الخريطة المحلية", color = Color.White) }
+                },
+                containerColor = Panel,
+                titleContentColor = Color.White
+            )
+        }
+        if (mapProviderNotice.isNotBlank()) {
+            Surface(modifier = Modifier.align(Alignment.BottomStart).padding(12.dp), color = Panel.copy(alpha = .96f), shape = RoundedCornerShape(12.dp)) {
+                Text(mapProviderNotice, color = Mint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
             }
         }
         if (routeStatus.isNotBlank()) {
