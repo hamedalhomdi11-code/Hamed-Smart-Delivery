@@ -142,6 +142,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
         locationPermissionLauncher.launch(requested.toTypedArray())
     }
+    // Ask for GPS permission on first launch; Android still controls the permission dialog.
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) requestLocationPermissions()
+    }
+
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
