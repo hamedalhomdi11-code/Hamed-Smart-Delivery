@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
       - name: Install data tools
         run: |
-          python -m pip install --upgrade pip pandas pyarrow shapely overturemaps==2.1.1
+          python -m pip install --upgrade pip pandas pyarrow shapely requests overturemaps==2.1.1
           sudo apt-get update
           sudo apt-get install -y osmium-tool
       - name: Download Saudi POI source from Hugging Face
@@ -43,6 +43,7 @@ jobs:
             data/source/overture-riyadh-places.parquet | tee data/output/overture_sync.report.json
       - name: Import additional Wikidata points of interest
         run: |
+          set -o pipefail
           python database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riyadh.sqlite | tee data/output/wikidata_sync.report.json
       - name: Download and extract current OpenStreetMap GCC data
         run: |
