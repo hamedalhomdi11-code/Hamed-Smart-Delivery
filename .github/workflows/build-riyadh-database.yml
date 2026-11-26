@@ -161,6 +161,21 @@ jobs:
           json.dump(report, open(report_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
           con.close()
           PY
+      - name: Build compact 100m restaurant and cafe hotspot layer v3
+        run: |
+          python database/build_riyadh_food_hotspots_v3.py \
+            data/output/hamed_smart_delivery_riyadh.sqlite \
+            data/output/food_density_clusters_v3.report.json
+          python - <<'PY'
+          import json
+          p = "data/output/hamed_smart_delivery_riyadh.sqlite.report.json"
+          r = json.load(open(p, encoding="utf-8"))
+          h = json.load(open("data/output/food_density_clusters_v3.report.json", encoding="utf-8"))
+          r["food_density_clusters_v3"] = {k:v for k,v in h.items() if k != "clusters"}
+          r["food_density_clusters_v3"]["cluster_table"] = "food_density_clusters_v3"
+          r["food_density_clusters_v3"]["membership_table"] = "food_density_cluster_members_v3"
+          json.dump(r, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          PY
       - name: Audit possible cross-source duplicate locations
         run: |
           python database/audit_riyadh_cross_source.py \
