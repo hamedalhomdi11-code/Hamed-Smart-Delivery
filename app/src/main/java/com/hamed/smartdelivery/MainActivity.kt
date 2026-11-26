@@ -343,6 +343,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var routeJob: Job? = null
             var markerAnimationJob: Job? = null
             val restaurantMarkers = linkedMapOf<String, Marker>()
+            val pharmacyMarkers = linkedMapOf<String, Marker>()
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
@@ -395,6 +396,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         displayedRoutePolyline = null
                         restaurantMarkers.values.toList().forEach { map.removeMarker(it) }
                         restaurantMarkers.clear()
+                        pharmacyMarkers.values.toList().forEach { map.removeMarker(it) }
+                        pharmacyMarkers.clear()
                         routePoints = emptyList()
                         routeSteps = emptyList()
                         currentStepIndex = 0
@@ -407,7 +410,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             while (isActive && searchActive && requestId == searchRequestId) {
                                 try {
                                     val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
-                                        location.latitude, location.longitude
+                                        context, location.latitude, location.longitude
                                     ) { updatedClusters ->
                                         if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming
                                         updatedClusters.take(8).forEach { cluster ->
@@ -466,6 +469,24 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             }
                                         } else {
                                             routeStatus = "تم تحديث نتائج مصادر المطاعم • أفضل تجمع: ${best.restaurantCount} مطعم"
+                                        }
+                                    }
+                                    val nearbyPharmacies = withContext(Dispatchers.IO) {
+                                        RiyadhPlacesDatabase.nearestPharmacies(
+                                            context, location.latitude, location.longitude, radiusMeters = 5000, limit = 30
+                                        )
+                                    }
+                                    nearbyPharmacies.forEach { pharmacy ->
+                                        val key = pharmacy.id
+                                        val position = LatLng(pharmacy.latitude, pharmacy.longitude)
+                                        val existingPharmacy = pharmacyMarkers[key]
+                                        if (existingPharmacy == null) {
+                                            pharmacyMarkers[key] = map.addMarker(
+                                                MarkerOptions().position(position).title("صيدلية • ${pharmacy.name}")
+                                            )
+                                        } else {
+                                            existingPharmacy.position = position
+                                            existingPharmacy.title = "صيدلية • ${pharmacy.name}"
                                         }
                                     }
                                     if (clusters.isNotEmpty()) break
@@ -591,6 +612,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 markerAnimationJob?.cancel()
                 restaurantMarkers.values.forEach { map.removeMarker(it) }
                 restaurantMarkers.clear()
+                pharmacyMarkers.values.forEach { map.removeMarker(it) }
+                pharmacyMarkers.clear()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
             }
         }
