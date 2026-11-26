@@ -1,15 +1,23 @@
 package com.hamed.smartdelivery
 
+import kotlin.math.roundToInt
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.Context
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.graphics.Color as AndroidColor
 import android.os.Looper
+import android.os.SystemClock
 import android.os.Build
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -28,10 +36,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -64,11 +76,34 @@ private val Cyan = Color(0xFF53C7F4)
 private val Muted = Color(0xFF8EA5B8)
 
 class MainActivity : ComponentActivity() {
+    private var sharedDestination by mutableStateOf<DeliveryDestination?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
-        val sharedText = intent?.getStringExtra(Intent.EXTRA_TEXT) ?: intent?.dataString
-        setContent { HamedApp(DestinationLinkParser.parse(sharedText)) }
+        sharedDestination = parseSharedDestination(intent)
+        setContent { HamedApp(sharedDestination) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    override fun onPause() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        super.onPause()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedDestination = parseSharedDestination(intent)
+    }
+
+    private fun parseSharedDestination(source: Intent?): DeliveryDestination? {
+        val sharedText = source?.getStringExtra(Intent.EXTRA_TEXT) ?: source?.dataString
+        return DestinationLinkParser.parse(sharedText)
     }
 }
 
@@ -80,6 +115,9 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
+    var mapExpanded by remember { mutableStateOf(false) }
+    var searchRequestId by remember { mutableIntStateOf(0) }
+    var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -94,6 +132,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
             trackingActive = true
+            if (pendingSearchAfterPermission) {
+                searchRequestId += 1
+                pendingSearchAfterPermission = false
+            }
         }
     }
     val requestLocationPermissions: () -> Unit = {
@@ -101,6 +143,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
         locationPermissionLauncher.launch(requested.toTypedArray())
     }
+    // Ask for GPS permission on first launch; Android still controls the permission dialog.
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) requestLocationPermissions()
+    }
+
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
@@ -115,11 +162,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
         MaterialTheme(colorScheme = darkColorScheme(background = Night, surface = Panel, primary = Mint)) {
-            Column(Modifier.fillMaxSize().background(Night)) {
-                Header(title, english) { english = !english }
+            Column(Modifier.fillMaxSize().background(Night).safeDrawingPadding()) {
+                if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING)
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -127,6 +174,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MapAction(Icons.Rounded.MyLocation, toggleTracking)
                             MapAction(Icons.Rounded.Layers) { perspective3D = !perspective3D }
+                            MapAction(if (mapExpanded) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen) { mapExpanded = !mapExpanded }
                         }
                         Column(Modifier.align(Alignment.BottomEnd).padding(14.dp), horizontalAlignment = Alignment.End) {
                             Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
@@ -134,7 +182,13 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    Dashboard(driverSnapshot, english) { command ->
+                    if (!mapExpanded) Dashboard(driverSnapshot, english) { command ->
+                        if (command == DriverCommand.StartSearch) {
+                            if (!hasLocationPermission) {
+                                pendingSearchAfterPermission = true
+                                requestLocationPermissions()
+                            } else searchRequestId += 1
+                        }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
                         if (transition.accepted) driverSnapshot = transition.snapshot
                     }
@@ -147,7 +201,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         }
                     }
                 }
-                NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
+                if (!mapExpanded) NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
                     val labels = if (english) listOf("Drive", "Orders", "Places", "Profile") else listOf("الملاحة", "الطلبات", "التجمعات", "حسابي")
                     val icons = listOf(Icons.Rounded.Navigation, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
                     labels.forEachIndexed { i, label ->
@@ -159,6 +213,34 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
     }
+}
+
+private fun openGoogleMaps(context: Context, destination: DeliveryDestination) {
+    val navigationUri = Uri.parse("google.navigation:q=${destination.latitude},${destination.longitude}&mode=d")
+    val googleMapsIntent = Intent(Intent.ACTION_VIEW, navigationUri).setPackage("com.google.android.apps.maps")
+    try {
+        context.startActivity(googleMapsIntent)
+    } catch (_: ActivityNotFoundException) {
+        val webUri = Uri.parse(
+            "https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving"
+        )
+        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+    }
+}
+
+private fun navigationLookAhead(latitude: Double, longitude: Double, bearingDegrees: Double, distanceMeters: Double): LatLng {
+    val earthRadius = 6371000.0
+    val angular = distanceMeters / earthRadius
+    val bearing = Math.toRadians(bearingDegrees)
+    val lat1 = Math.toRadians(latitude)
+    val lon1 = Math.toRadians(longitude)
+    val lat2 = kotlin.math.asin(kotlin.math.sin(lat1) * kotlin.math.cos(angular) +
+        kotlin.math.cos(lat1) * kotlin.math.sin(angular) * kotlin.math.cos(bearing))
+    val lon2 = lon1 + kotlin.math.atan2(
+        kotlin.math.sin(bearing) * kotlin.math.sin(angular) * kotlin.math.cos(lat1),
+        kotlin.math.cos(angular) - kotlin.math.sin(lat1) * kotlin.math.sin(lat2)
+    )
+    return LatLng(Math.toDegrees(lat2), Math.toDegrees(lon2))
 }
 
 @Composable
@@ -179,14 +261,33 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var activeDestination by remember(destination) { mutableStateOf(destination) }
+    var lastProcessedSearch by remember { mutableIntStateOf(0) }
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
-    var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
-    var routeRequested by remember(destination) { mutableStateOf(false) }
+    var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
+    var navigationActive by remember { mutableStateOf(false) }
+    var currentBearing by remember { mutableFloatStateOf(0f) }
+    var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
+    var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
+    var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
+    var currentStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
+    var routeRequested by remember(activeDestination) { mutableStateOf(false) }
+    var showMapProviderDialog by remember { mutableStateOf(false) }
+    var mapProviderNotice by remember { mutableStateOf("") }
+    var ttsReady by remember { mutableStateOf(false) }
+    val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
+    LaunchedEffect(ttsReady) {
+        if (ttsReady) speech.language = Locale("ar", "SA")
+    }
+    DisposableEffect(speech) {
+        onDispose { speech.stop(); speech.shutdown() }
+    }
     val scope = rememberCoroutineScope()
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
@@ -216,12 +317,12 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 map.uiSettings.isAttributionEnabled = true
                 map.uiSettings.isLogoEnabled = true
                 map.cameraPosition = CameraPosition.Builder()
-                    .target(destination?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(24.7136, 46.6753))
-                    .zoom(if (destination == null) 13.5 else 15.0)
+                    .target(activeDestination?.let { LatLng(it.latitude, it.longitude) } ?: LatLng(24.7136, 46.6753))
+                    .zoom(if (activeDestination == null) 13.5 else 15.0)
                     .tilt(if (perspective3D) 50.0 else 0.0)
                     .build()
-                if (destination != null) {
-                    map.addMarker(MarkerOptions().position(LatLng(destination.latitude, destination.longitude)).title("وجهة التوصيل"))
+                if (activeDestination != null) {
+                    map.addMarker(MarkerOptions().position(LatLng(activeDestination!!.latitude, activeDestination!!.longitude)).title("وجهة التوصيل"))
                 }
                 styleReady = true
             }
@@ -238,7 +339,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, destination, trackingActive, perspective3D) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, perspective3D, searchRequestId, searchActive) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
@@ -246,44 +347,258 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
             var firstFix = true
             var lastCameraLocation: Location? = null
+            var lastRerouteAt = 0L
+            var discoveryJob: Job? = null
+            var routeJob: Job? = null
+            var markerAnimationJob: Job? = null
+            val restaurantMarkers = linkedMapOf<String, Marker>()
+            val pharmacyMarkers = linkedMapOf<String, Marker>()
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
+                    if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
                     val existing = userMarker
                     if (existing == null) {
                         userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
                     } else {
-                        existing.position = point
+                        // Interpolate between GPS fixes so the position marker glides instead of jumping.
+                        markerAnimationJob?.cancel()
+                        val start = existing.position
+                        val startedAt = SystemClock.uptimeMillis()
+                        val durationMs = 700L
+                        markerAnimationJob = scope.launch {
+                            while (isActive) {
+                                val fraction = ((SystemClock.uptimeMillis() - startedAt).toFloat() / durationMs).coerceIn(0f, 1f)
+                                val eased = fraction * fraction * (3f - 2f * fraction)
+                                existing.position = LatLng(
+                                    start.latitude + (point.latitude - start.latitude) * eased,
+                                    start.longitude + (point.longitude - start.longitude) * eased
+                                )
+                                if (fraction >= 1f) break
+                                delay(16L)
+                            }
+                        }
                     }
                     val previousCameraLocation = lastCameraLocation
-                    val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 15f))
+                    val navigating = navigationActive && activeDestination != null
+                    val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
                     if (shouldFollow) {
                         firstFix = false
-                        val bearing = if (location.hasBearing()) location.bearing.toDouble() else map.cameraPosition.bearing
+                        val bearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing.toDouble() else map.cameraPosition.bearing
                         map.animateCamera(
                             CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5).tilt(if (perspective3D) 50.0 else 0.0).bearing(bearing).build()
+                                CameraPosition.Builder().target(if (navigating) navigationLookAhead(location.latitude, location.longitude, bearing, 115.0) else point)
+                                    .zoom(if (navigating) 18.0 else 16.5)
+                                    .tilt(if (perspective3D || navigating) 58.0 else 0.0).bearing(bearing).build()
                             ),
-                            650
+                            850
                         )
                         lastCameraLocation = Location(location)
                     }
-                    if (destination != null && !routeRequested) {
+                    if (searchActive && searchRequestId > lastProcessedSearch) {
+                        lastProcessedSearch = searchRequestId
+                        val requestId = searchRequestId
+                        routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
+                        navigationActive = false
+                        routeJob?.cancel()
+                        displayedRoutePolyline?.let { map.removePolyline(it) }
+                        displayedRoutePolyline = null
+                        restaurantMarkers.values.toList().forEach { map.removeMarker(it) }
+                        restaurantMarkers.clear()
+                        pharmacyMarkers.values.toList().forEach { map.removeMarker(it) }
+                        pharmacyMarkers.clear()
+                        routePoints = emptyList()
+                        routeSteps = emptyList()
+                        currentStepIndex = 0
+                        nextTurnInstruction = ""
+                        activeDestination = null
+                        routeRequested = false
+                        discoveryJob?.cancel()
+                        discoveryJob = scope.launch {
+                            var retry = 0
+                            while (isActive && searchActive && requestId == searchRequestId) {
+                                try {
+                                    val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
+                                        context, location.latitude, location.longitude
+                                    ) { updatedClusters ->
+                                        if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming
+                                        updatedClusters.take(8).forEach { cluster ->
+                                            val markerKey = "${(cluster.latitude * 100000).roundToInt()}:${(cluster.longitude * 100000).roundToInt()}"
+                                            val markerPosition = LatLng(cluster.latitude, cluster.longitude)
+                                            val existingClusterMarker = restaurantMarkers[markerKey]
+                                            if (existingClusterMarker == null) {
+                                                restaurantMarkers[markerKey] = map.addMarker(
+                                                    MarkerOptions().position(markerPosition).title("تجمع مطاعم • ${cluster.restaurantCount}")
+                                                )
+                                            } else {
+                                                existingClusterMarker.position = markerPosition
+                                                existingClusterMarker.title = "تجمع مطاعم • ${cluster.restaurantCount}"
+                                            }
+                                        }
+                                        val best = updatedClusters.firstOrNull() ?: return@findNearestClustersStreaming
+                                        val nextDestination = DeliveryDestination(best.latitude, best.longitude)
+                                        val previousDestination = activeDestination
+                                        val destinationChanged = if (previousDestination == null) true else {
+                                            val delta = FloatArray(1)
+                                            Location.distanceBetween(
+                                                previousDestination.latitude, previousDestination.longitude,
+                                                nextDestination.latitude, nextDestination.longitude, delta
+                                            )
+                                            delta[0] > 100f
+                                        }
+                                        if (destinationChanged) {
+                                            activeDestination = nextDestination
+                                            routeRequested = true
+                                            routeJob?.cancel()
+                                            routeStatus = "وصلت أول نتيجة صالحة • جارٍ رسم المسار"
+                                            routeJob = scope.launch {
+                                                val route = withContext(Dispatchers.IO) {
+                                                    OsrmRouteClient.fetchRoute(
+                                                        location.latitude, location.longitude,
+                                                        nextDestination.latitude, nextDestination.longitude
+                                                    )
+                                                }
+                                                if (route != null && route.points.size > 1 && requestId == searchRequestId) {
+                                                    displayedRoutePolyline?.let { map.removePolyline(it) }
+                                displayedRoutePolyline = null
+                                                    displayedRoutePolyline = map.addPolyline(
+                                                        PolylineOptions().addAll(route.points)
+                                                            .color(AndroidColor.rgb(94, 240, 194)).width(6f)
+                                                    )
+                                                    routePoints = route.points
+                                                    routeSteps = route.steps
+                                                    currentStepIndex = 0
+                                                    nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
+                                                    routeStatus = "تم رسم المسار • اضغط ابدأ الملاحة لبدء التوجيه"
+                                                    routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
+                                                } else if (requestId == searchRequestId) {
+                                                    routeRequested = false
+                                                    routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
+                                                }
+                                            }
+                                        } else {
+                                            routeStatus = "تم تحديث نتائج مصادر المطاعم • أفضل تجمع: ${best.restaurantCount} مطعم"
+                                        }
+                                    }
+                                    val nearbyPharmacies = withContext(Dispatchers.IO) {
+                                        RiyadhPlacesDatabase.nearestPharmacies(
+                                            context, location.latitude, location.longitude, radiusMeters = 5000, limit = 30
+                                        )
+                                    }
+                                    nearbyPharmacies.forEach { pharmacy ->
+                                        val key = pharmacy.id
+                                        val position = LatLng(pharmacy.latitude, pharmacy.longitude)
+                                        val existingPharmacy = pharmacyMarkers[key]
+                                        if (existingPharmacy == null) {
+                                            pharmacyMarkers[key] = map.addMarker(
+                                                MarkerOptions().position(position).title("صيدلية • ${pharmacy.name}")
+                                            )
+                                        } else {
+                                            existingPharmacy.position = position
+                                            existingPharmacy.title = "صيدلية • ${pharmacy.name}"
+                                        }
+                                    }
+                                    if (clusters.isNotEmpty()) break
+                                    routeStatus = "لم تصل نتائج بعد • مستمر في البحث"
+                                } catch (error: Exception) {
+                                    routeStatus = "تعذر مصدر مؤقتاً • مستمر في إعادة المحاولة"
+                                }
+                                retry += 1
+                                delay((2000L * (1L shl retry.coerceAtMost(4))).coerceAtMost(30000L))
+                            }
+                        }
+                    }
+                    if (activeDestination != null && !routeRequested) {
                         routeRequested = true
                         routeStatus = "جارٍ حساب المسار"
                         scope.launch {
                             val route = withContext(Dispatchers.IO) {
-                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
+                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
                             }
                             if (route != null && route.points.size > 1) {
-                                map.addPolyline(
+                                displayedRoutePolyline?.let { map.removePolyline(it) }
+                                displayedRoutePolyline = null
+                                displayedRoutePolyline = map.addPolyline(
                                     PolylineOptions().addAll(route.points)
                                         .color(AndroidColor.rgb(94, 240, 194))
                                         .width(6f)
                                 )
+                                routePoints = route.points
+                                routeSteps = route.steps
+                                currentStepIndex = 0
+                                nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
+                                routeStatus = "تم رسم المسار • اضغط ابدأ الملاحة لبدء التوجيه"
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
                             } else {
-                                routeStatus = "تعذر حساب المسار حالياً"
+                                routeRequested = false
+                                routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
+                            }
+                        }
+                    }
+                    val currentStep = routeSteps.getOrNull(currentStepIndex)
+                    val maneuverPoint = currentStep?.location
+                    if (maneuverPoint != null) {
+                        val distanceToManeuver = FloatArray(1)
+                        Location.distanceBetween(location.latitude, location.longitude, maneuverPoint.latitude, maneuverPoint.longitude, distanceToManeuver)
+                        if (distanceToManeuver[0] <= 45f && currentStepIndex < routeSteps.lastIndex) {
+                            currentStepIndex += 1
+                            nextTurnInstruction = routeSteps.getOrNull(currentStepIndex)?.instruction ?: "وصلت إلى وجهتك"
+                            if (navigationActive && ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-turn-$currentStepIndex")
+                        }
+                    }
+                    val currentRoute = routePoints
+                    if (navigationActive && currentRoute.size > 3) {
+                        var nearestIndex = 0
+                        var nearestOnRoute = Float.MAX_VALUE
+                        currentRoute.forEachIndexed { index, routePoint ->
+                            val result = FloatArray(1)
+                            Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
+                            if (result[0] < nearestOnRoute) {
+                                nearestOnRoute = result[0]
+                                nearestIndex = index
+                            }
+                        }
+                        if (nearestIndex >= 3 && nearestOnRoute <= 70f && currentRoute.size - nearestIndex >= 2) {
+                            val remaining = currentRoute.drop(nearestIndex)
+                            routePoints = remaining
+                            displayedRoutePolyline?.let { map.removePolyline(it) }
+                            displayedRoutePolyline = map.addPolyline(
+                                PolylineOptions().addAll(remaining)
+                                    .color(AndroidColor.rgb(94, 240, 194)).width(6f)
+                            )
+                        }
+                    }
+                    if (activeDestination != null && currentRoute.size > 1) {
+                        val nearestDistance = currentRoute.minOf { routePoint ->
+                            val result = FloatArray(1)
+                            Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
+                            result[0]
+                        }
+                        val now = System.currentTimeMillis()
+                        if (nearestDistance > 85f && now - lastRerouteAt > 20000L) {
+                            lastRerouteAt = now
+                            routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
+                            scope.launch {
+                                val updated = withContext(Dispatchers.IO) {
+                                    OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
+                                }
+                                if (updated != null && updated.points.size > 1) {
+                                    displayedRoutePolyline?.let { map.removePolyline(it) }
+                                displayedRoutePolyline = null
+                                    displayedRoutePolyline = map.addPolyline(
+                                        PolylineOptions().addAll(updated.points)
+                                            .color(AndroidColor.rgb(94, 240, 194))
+                                            .width(6f)
+                                    )
+                                    routePoints = updated.points
+                                    routeSteps = updated.steps
+                                    currentStepIndex = 0
+                                    nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
+                                    if (navigationActive && ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
+                                    routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
+                                } else {
+                                    routeStatus = "تعذر تحديث المسار حالياً"
+                                }
                             }
                         }
                     }
@@ -292,12 +607,22 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             try {
                 val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
                 locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
+                // Use a cached fix immediately: discovery and route calculation must work while the driver is stationary.
+                (locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))?.let { listener.onLocationChanged(it) }
             } catch (_: SecurityException) {
                 // Permission may be revoked while the map is open.
             } catch (_: IllegalArgumentException) {
                 // No location provider is available on this device.
             }
             onDispose {
+                discoveryJob?.cancel()
+                routeJob?.cancel()
+                markerAnimationJob?.cancel()
+                restaurantMarkers.values.forEach { map.removeMarker(it) }
+                restaurantMarkers.clear()
+                pharmacyMarkers.values.forEach { map.removeMarker(it) }
+                pharmacyMarkers.clear()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
             }
         }
@@ -309,9 +634,101 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
+        if (navigationActive && activeDestination != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).offset(y = 100.dp).size(36.dp),
+                color = Panel.copy(alpha = .94f),
+                shape = CircleShape
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(24.dp).rotate(currentBearing))
+                }
+            }
+        }
+        if (nextTurnInstruction.isNotBlank()) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 70.dp, vertical = 12.dp),
+                color = Panel.copy(alpha = .96f),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(nextTurnInstruction, color = Color.White, fontSize = 12.sp, maxLines = 2)
+                }
+            }
+        }
+        if (activeDestination != null && routePoints.size > 1) {
+            Row(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 54.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        navigationActive = true
+                        val instruction = nextTurnInstruction.ifBlank { "ابدأ السير إلى الوجهة" }
+                        if (ttsReady) speech.speak(instruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-navigation-start")
+                        routeStatus = "الملاحة داخل التطبيق تعمل"
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Night)
+                ) {
+                    Icon(Icons.Rounded.Navigation, null)
+                    Spacer(Modifier.width(5.dp))
+                    Text(if (navigationActive) "الملاحة تعمل" else "ابدأ الملاحة")
+                }
+                if (navigationActive) {
+                    OutlinedButton(
+                        onClick = {
+                            navigationActive = false
+                            speech.stop()
+                            routeStatus = "تم إيقاف الملاحة • المسار ما زال ظاهراً"
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    ) {
+                        Icon(Icons.Rounded.Stop, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("إيقاف الملاحة")
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showMapProviderDialog = true },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Icon(Icons.Rounded.Map, null)
+                    Spacer(Modifier.width(5.dp))
+                    Text("تبديل تطبيق الخريطة")
+                }
+            }
+        }
+        if (showMapProviderDialog && activeDestination != null) {
+            AlertDialog(
+                onDismissRequest = { showMapProviderDialog = false },
+                title = { Text("اختيار تطبيق الخريطة", color = Color.White) },
+                text = { Text("اختر طريقة عرض هذا المسار. يمكنك إبقاء الخريطة المحلية أو فتح الوجهة في Google Maps.", color = Muted) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showMapProviderDialog = false
+                        openGoogleMaps(context, activeDestination!!)
+                    }) { Text("فتح Google Maps", color = Mint) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showMapProviderDialog = false
+                        mapProviderNotice = "الخريطة المحلية هي المحددة"
+                    }) { Text("الخريطة المحلية", color = Color.White) }
+                },
+                containerColor = Panel,
+                titleContentColor = Color.White
+            )
+        }
+        if (mapProviderNotice.isNotBlank()) {
+            Surface(modifier = Modifier.align(Alignment.BottomStart).padding(12.dp), color = Panel.copy(alpha = .96f), shape = RoundedCornerShape(12.dp)) {
+                Text(mapProviderNotice, color = Mint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+            }
+        }
         if (routeStatus.isNotBlank()) {
             Surface(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
                 color = Panel.copy(alpha = .94f),
                 shape = RoundedCornerShape(14.dp)
             ) {
@@ -499,7 +916,7 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.2.0", color = Muted, fontSize = 10.sp)
+        Text("HAMED SMART DELIVERY • 0.4.0", color = Muted, fontSize = 10.sp)
     }
 }
 

@@ -1,7 +1,10 @@
 name: Android CI
+permissions:
+  actions: read
+  contents: read
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, "release/**", "feature/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -10,6 +13,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Download latest successful Riyadh database
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-riyadh-database.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          test -n "$RUN_ID" || { echo "::error::No successful Riyadh database workflow run was found"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/riyadh-database" app/src/main/assets
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name hamed-smart-delivery-riyadh-database --dir "$RUNNER_TEMP/riyadh-database"
+          DB_FILE="$(find "$RUNNER_TEMP/riyadh-database" -type f -name hamed_smart_delivery_riyadh.sqlite -print -quit)"
+          test -n "$DB_FILE" || { echo "::error::SQLite database missing from downloaded artifact"; exit 1; }
+          python3 - "$DB_FILE" <<'PY'
+          import sqlite3, sys
+          db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+          assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+          assert db.execute("SELECT COUNT(*) FROM food_density_clusters_v3").fetchone()[0] > 0
+          assert db.execute("SELECT COUNT(*) FROM places WHERE category='pharmacy' AND is_active=1").fetchone()[0] > 0
+          print("Riyadh SQLite integrity and v3/pharmacy tables verified")
+          db.close()
+          PY
+          cp "$DB_FILE" app/src/main/assets/hamed_smart_delivery_riyadh.sqlite
+          sha256sum app/src/main/assets/hamed_smart_delivery_riyadh.sqlite
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -22,11 +46,61 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Build and test
+      - name: Build and test debug APK
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
-      - name: Upload APK
+      - name: Verify debug APK
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-debug-signature.txt
+      - name: Configure permanent 0.4.2 release signing key
+        id: signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hamed-release.jks"
+            chmod 600 "$RUNNER_TEMP/hamed-release.jks"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release APK not produced yet. Configure the four permanent 0.4.2 signing secrets."
+          fi
+      - name: Build APK signed with the permanent 0.4.2 key
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          HAMED_KEYSTORE_FILE: ${{ runner.temp }}/hamed-release.jks
+          HAMED_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HAMED_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          HAMED_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon :app:assembleRelease
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-release-signature.txt
+      - name: Upload APKs and signature reports
         uses: actions/upload-artifact@v4
         with:
-          name: hamed-smart-delivery-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          name: hamed-smart-delivery-0.4.2-build
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
+            apk-debug-signature.txt
+            apk-release-signature.txt
+          if-no-files-found: warn
+      - name: Run Android emulator smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ANDROID_I_WANT_MY_TCG: 'yes'
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: gradle --no-daemon :app:connectedDebugAndroidTest
