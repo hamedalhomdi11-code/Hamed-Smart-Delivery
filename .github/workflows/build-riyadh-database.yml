@@ -143,6 +143,24 @@ jobs:
           con.close()
           print(json.dumps(report["restaurant_clusters"], ensure_ascii=False))
           PY
+      - name: Build category-separated restaurant and cafe hotspot layer v2
+        run: |
+          python database/build_riyadh_food_hotspots_v2.py \
+            data/output/hamed_smart_delivery_riyadh.sqlite \
+            data/output/food_density_clusters_v2.report.json
+          python - <<'PY'
+          import json, sqlite3
+          db = "data/output/hamed_smart_delivery_riyadh.sqlite"
+          report_path = db + ".report.json"
+          report = json.load(open(report_path, encoding="utf-8"))
+          hotspots = json.load(open("data/output/food_density_clusters_v2.report.json", encoding="utf-8"))
+          con = sqlite3.connect(db)
+          report["food_density_clusters_v2"] = {k:v for k,v in hotspots.items() if k != "clusters"}
+          report["food_density_clusters_v2"]["cluster_table"] = "food_density_clusters_v2"
+          report["food_density_clusters_v2"]["membership_table"] = "food_density_cluster_members_v2"
+          json.dump(report, open(report_path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          con.close()
+          PY
       - name: Audit possible cross-source duplicate locations
         run: |
           python database/audit_riyadh_cross_source.py \
