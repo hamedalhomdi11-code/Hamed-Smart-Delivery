@@ -48,7 +48,7 @@ jobs:
           if python database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riyadh.sqlite | tee data/output/wikidata_sync.report.json; then
             echo "Wikidata import completed."
           else
-            printf '%s\\n' '{"status":"unavailable","source":"Wikidata Query Service","error":"Wikidata request failed; optional source skipped so the other licensed sources and derived clusters can still be built."}' > data/output/wikidata_sync.report.json
+            printf '%s\n' '{"status":"unavailable","source":"Wikidata Query Service","error":"Wikidata request failed; optional source skipped so the other licensed sources and derived clusters can still be built."}' > data/output/wikidata_sync.report.json
             echo "::warning::Wikidata unavailable; continuing with Overture and OpenStreetMap."
           fi
       - name: Download and extract current OpenStreetMap GCC data
