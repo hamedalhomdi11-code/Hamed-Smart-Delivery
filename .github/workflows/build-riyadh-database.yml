@@ -118,8 +118,8 @@ jobs:
           PY
       - name: Derive restaurant density clusters and centroid coordinates
         run: |
-          python database/derive_riyadh_restaurant_clusters.py \\
-            data/output/hamed_smart_delivery_riyadh.sqlite \\
+          python database/derive_riyadh_restaurant_clusters.py \
+            data/output/hamed_smart_delivery_riyadh.sqlite \
             data/output/restaurant_clusters.report.json
           python - <<'PY'
           import json, sqlite3
