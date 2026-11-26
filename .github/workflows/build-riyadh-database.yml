@@ -52,6 +52,7 @@ jobs:
             echo "::warning::Wikidata unavailable; continuing with Overture and OpenStreetMap."
           fi
       - name: Download and extract current OpenStreetMap GCC data
+        continue-on-error: true
         run: |
           curl -L --fail --retry 5 --retry-all-errors \
             "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf" \
@@ -84,6 +85,7 @@ jobs:
             -o data/source/riyadh-pois.geojson --overwrite
           test -s data/source/riyadh-pois.geojson
       - name: Merge OpenStreetMap POIs into SQLite
+        if: ${{ hashFiles('data/source/riyadh-pois.geojson') != '' }}
         run: |
           python database/sync_riyadh_geofabrik.py \
             data/output/hamed_smart_delivery_riyadh.sqlite \
