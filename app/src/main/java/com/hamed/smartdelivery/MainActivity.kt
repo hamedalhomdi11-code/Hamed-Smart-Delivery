@@ -426,6 +426,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
                         }
                         Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            // Keep GPS start/stop available directly on the map as well as in Profile.
+                            MapAction(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff) { toggleTracking() }
                             MapAction(Icons.Rounded.MyLocation) { recenterRequestId += 1 }
                             MapAction(Icons.Rounded.Layers) { perspective3D = !perspective3D }
                             MapAction(if (mapExpanded) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen) { mapExpanded = !mapExpanded }
