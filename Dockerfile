@@ -19,12 +19,13 @@ RUN set -e; \
     test -s "$APK"; \
     unzip -l "$APK" | grep -q 'assets/hamed_smart_delivery_riyadh.sqlite'; \
     "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "versionName='0.4.3'"; \
+    "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "versionCode='8'"; \
     "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > /srv/apk-signature.txt 2>&1; \
     cp "$APK" /srv/hamed-smart-delivery-0.4.3-debug.apk; \
     cp data/output/riyadh-build-report.json /srv/riyadh-build-report.json; \
     APK_SIZE=$(stat -c '%s' "$APK"); \
     APK_SHA256=$(sha256sum "$APK" | cut -d' ' -f1); \
-    printf '{"versionName":"0.4.3","variant":"debug","apkSizeBytes":%s,"apkSha256":"%s","riyadhDatabaseAsset":"verified","signature":"verified"}\n' "$APK_SIZE" "$APK_SHA256" > /srv/apk-build-report.json;
+    printf '{"versionName":"0.4.3","versionCode":8,"variant":"debug","apkSizeBytes":%s,"apkSha256":"%s","riyadhDatabaseAsset":"verified","signature":"verified"}\n' "$APK_SIZE" "$APK_SHA256" > /srv/apk-build-report.json;
     cat /srv/apk-build-report.json
 EXPOSE 10000
 CMD ["python3", "/workspace/scripts/serve_apk.py"]
