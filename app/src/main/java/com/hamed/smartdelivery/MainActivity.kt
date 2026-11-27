@@ -150,7 +150,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var manualSwitchRequestId by remember { mutableIntStateOf(0) }
     var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
     var excludedClusters by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
-    var visitedClusterIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    val clusterPrefs = remember { context.getSharedPreferences("cluster_visit_history", Context.MODE_PRIVATE) }
+    var visitedClusterIds by remember { mutableStateOf(clusterPrefs.getString("visited_ids", "").orEmpty().split('|').filter { it.isNotBlank() }) }
     var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var clusterWaitStartedAt by remember { mutableStateOf<Long?>(null) }
     var waitRemainingSeconds by remember { mutableIntStateOf(0) }
@@ -183,6 +184,12 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         val requested = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
         locationPermissionLauncher.launch(requested.toTypedArray())
+    }
+    LaunchedEffect(Unit) {
+        val database = OrderClusterDatabase(context)
+        orderProducingClusterIds = withContext(Dispatchers.IO) {
+            try { database.orderProducingClusterIds() } finally { database.close() }
+        }
     }
     LaunchedEffect(clusterWaitStartedAt, driverSnapshot.mode) {
         val startedAt = clusterWaitStartedAt
@@ -230,7 +237,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) visitedClusterIds = visitedClusterIds + id; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
