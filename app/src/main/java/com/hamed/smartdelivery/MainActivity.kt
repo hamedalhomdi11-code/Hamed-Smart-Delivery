@@ -75,6 +75,7 @@ import com.hamed.smartdelivery.domain.DriverMode
 import com.hamed.smartdelivery.domain.DriverReducer
 import com.hamed.smartdelivery.domain.DriverSnapshot
 import com.hamed.smartdelivery.domain.GpsMode
+import com.hamed.smartdelivery.domain.ClusterPolicy
 
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
