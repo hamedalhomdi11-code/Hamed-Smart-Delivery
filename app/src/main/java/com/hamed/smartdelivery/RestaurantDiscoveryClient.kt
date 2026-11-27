@@ -29,7 +29,7 @@ object RestaurantDiscoveryClient {
         latitude: Double,
         longitude: Double,
         radiusMeters: Int = 5000,
-        onUpdate: (List<RestaurantCluster>) -> Unit
+        onUpdate: (List<RestaurantCluster>) -> Boolean
     ): List<RestaurantCluster> {
         require(latitude.isFinite() && latitude in -90.0..90.0) {
             "إحداثيات خط العرض غير صالحة"
