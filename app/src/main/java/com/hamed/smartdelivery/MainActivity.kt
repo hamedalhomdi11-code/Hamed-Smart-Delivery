@@ -530,14 +530,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
     var clusterEnteredAt by remember(clusterWaitStartedAt, selectedClusterId) { mutableStateOf(clusterWaitStartedAt) }
     var autoSwitchTriggered by remember { mutableStateOf(false) }
-    var ttsReady by remember { mutableStateOf(false) }
-    val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
-    LaunchedEffect(ttsReady) {
-        if (ttsReady) speech.language = Locale("ar", "SA")
-    }
-    DisposableEffect(speech) {
-        onDispose { speech.stop(); speech.shutdown() }
-    }
     LaunchedEffect(manualSwitchRequestId) {
         if (manualSwitchRequestId > 0) {
             currentCluster = null
@@ -810,17 +802,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 routeRequested = false
                                 routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
                             }
-                        }
-                    }
-                    val currentStep = routeSteps.getOrNull(currentStepIndex)
-                    val maneuverPoint = currentStep?.location
-                    if (maneuverPoint != null) {
-                        val distanceToManeuver = FloatArray(1)
-                        Location.distanceBetween(location.latitude, location.longitude, maneuverPoint.latitude, maneuverPoint.longitude, distanceToManeuver)
-                        if (distanceToManeuver[0] <= 45f && currentStepIndex < routeSteps.lastIndex) {
-                            currentStepIndex += 1
-                            nextTurnInstruction = routeSteps.getOrNull(currentStepIndex)?.instruction ?: "وصلت إلى وجهتك"
-                            if (navigationActive && ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-turn-$currentStepIndex")
                         }
                     }
                     val currentRoute = routePoints
