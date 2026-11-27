@@ -359,6 +359,13 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     DisposableEffect(speech) {
         onDispose { speech.stop(); speech.shutdown() }
     }
+    LaunchedEffect(manualSwitchRequestId) {
+        if (manualSwitchRequestId > 0) {
+            currentCluster = null
+            clusterEnteredAt = null
+            autoSwitchTriggered = false
+        }
+    }
     val scope = rememberCoroutineScope()
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
