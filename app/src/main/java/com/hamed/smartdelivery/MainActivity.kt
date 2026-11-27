@@ -190,6 +190,20 @@ class MainActivity : ComponentActivity() {
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     val workflowPrefs = remember { context.getSharedPreferences("workflow_state", Context.MODE_PRIVATE) }
+    var announcementsEnabled by remember { mutableStateOf(workflowPrefs.getBoolean("announcements_enabled", true)) }
+    var announcementVolume by remember { mutableFloatStateOf(workflowPrefs.getFloat("announcement_volume", 0.85f).coerceIn(0f, 1f)) }
+    var speechReady by remember { mutableStateOf(false) }
+    val announcementsSpeech = remember(context) { TextToSpeech(context) { status -> speechReady = status == TextToSpeech.SUCCESS } }
+    LaunchedEffect(speechReady) { if (speechReady) announcementsSpeech.language = Locale("ar", "SA") }
+    DisposableEffect(announcementsSpeech) { onDispose { announcementsSpeech.stop(); announcementsSpeech.shutdown() } }
+    fun announceArabic(message: String) {
+        if (announcementsEnabled && speechReady && message.isNotBlank()) {
+            announcementsSpeech.setSpeechRate(1.0f)
+            announcementsSpeech.speak(message, TextToSpeech.QUEUE_FLUSH,
+                android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, announcementVolume) },
+                "hamed-event-\u0024{message.hashCode()}")
+        }
+    }
     val restoredDriverMode = remember {
         val savedMode = runCatching {
             DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!)
@@ -229,10 +243,30 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var waitRemainingSeconds by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(driverSnapshot) {
-        workflowPrefs.edit()
-            .putString("driver_mode", driverSnapshot.mode.name)
-            .putString("last_command_id", driverSnapshot.lastCommandId)
-            .apply()
+        workflowPrefs.edit().putString("driver_mode", driverSnapshot.mode.name)
+            .putString("last_command_id", driverSnapshot.lastCommandId).apply()
+    }
+    var previousDriverMode by remember { mutableStateOf(driverSnapshot.mode) }
+    LaunchedEffect(driverSnapshot.mode) {
+        if (driverSnapshot.mode != previousDriverMode) {
+            when (driverSnapshot.mode) {
+                DriverMode.SEARCHING -> announceArabic("بدأ البحث عن الطلبات")
+                DriverMode.ORDER_RECEIVED -> announceArabic("تم استلام الطلب. توقف البحث مؤقتاً")
+                DriverMode.IDLE -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("اكتملت المهمة. يمكنك بدء البحث عن طلب جديد")
+                DriverMode.SAFE_MODE -> announceArabic("تم تفعيل وضع الأمان")
+            }
+            previousDriverMode = driverSnapshot.mode
+        }
+    }
+    var previousSearchRequestId by remember { mutableIntStateOf(searchRequestId) }
+    LaunchedEffect(searchRequestId) {
+        if (searchRequestId > previousSearchRequestId && driverSnapshot.mode == DriverMode.SEARCHING)
+            announceArabic("تم تغيير التجمع. يجري البحث عن التجمع التالي")
+        previousSearchRequestId = searchRequestId
+    }
+    LaunchedEffect(clusterWaitStartedAt) {
+        if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
+            announceArabic("بدأ مؤقت انتظار التجمع لمدة خمس دقائق")
     }
     LaunchedEffect(selectedCluster) { writePersistedCluster(workflowPrefs, selectedCluster) }
     LaunchedEffect(excludedClusters) {
@@ -365,7 +399,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         when (selected) {
                             1 -> OrdersScreen(driverSnapshot, english)
                             2 -> PlacesScreen(english)
-                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() })
+                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() }, announcementsEnabled, { enabled -> announcementsEnabled = enabled; workflowPrefs.edit().putBoolean("announcements_enabled", enabled).apply() }, announcementVolume, { value -> announcementVolume = value.coerceIn(0f, 1f); workflowPrefs.edit().putFloat("announcement_volume", announcementVolume).apply() }, { announceArabic("هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري") })
                         }
                     }
                 }
@@ -1038,7 +1072,7 @@ private fun PlacesScreen(english: Boolean) {
 }
 
 @Composable
-private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit) {
+private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit, announcementsEnabled: Boolean, onAnnouncementsChange: (Boolean) -> Unit, announcementVolume: Float, onAnnouncementVolumeChange: (Float) -> Unit, onTestAnnouncement: () -> Unit) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(if (english) "PROFILE & SETTINGS" else "حسابي والإعدادات", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleLanguage() }) {
@@ -1076,6 +1110,24 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                     Text(if (english) "Vibration warning when route changes" else "اهتزاز متزامن مع التنبيه الصوتي", color = Muted, fontSize = 11.sp)
                 }
                 Switch(checked = vibrationAlertsEnabled, onCheckedChange = onVibrationChange)
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (english) "Arabic voice announcements" else "التعليمات الصوتية العربية", color = Color.White)
+                        Text(if (english) "Search, order and task events" else "إعلانات بدء البحث والطلب واكتمال المهمة وتغيير التجمع", color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = announcementsEnabled, onCheckedChange = onAnnouncementsChange)
+                }
+                Text(if (english) "Announcement volume" else "مستوى صوت التعليمات", color = Color.White, fontSize = 12.sp)
+                Slider(value = announcementVolume, onValueChange = onAnnouncementVolumeChange, enabled = announcementsEnabled)
+                OutlinedButton(onClick = onTestAnnouncement, enabled = announcementsEnabled, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.VolumeUp, null)
+                    Spacer(Modifier.width(7.dp))
+                    Text(if (english) "Test voice" else "اختبار الصوت")
+                }
             }
         }
         Text("HAMED SMART DELIVERY • 0.4.3", color = Muted, fontSize = 10.sp)
