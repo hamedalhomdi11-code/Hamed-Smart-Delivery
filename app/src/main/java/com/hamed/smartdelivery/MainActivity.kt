@@ -82,6 +82,9 @@ private val Mint = Color(0xFF5EF0C2)
 private val Cyan = Color(0xFF53C7F4)
 private val Muted = Color(0xFF8EA5B8)
 
+private fun clusterStableId(cluster: RestaurantCluster): String = cluster.clusterId?.takeIf { it.isNotBlank() }
+    ?: "geo:" + String.format(Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
+
 private fun alertRouteChanged(context: Context, soundEnabled: Boolean, vibrationEnabled: Boolean) {
     if (vibrationEnabled) runCatching {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
