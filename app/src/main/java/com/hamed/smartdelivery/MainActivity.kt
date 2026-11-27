@@ -829,8 +829,12 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 var requestedProvider = false
                 for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                     if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
-                        locationManager.requestLocationUpdates(provider, 2500L, 3f, listener, Looper.getMainLooper())
-                        requestedProvider = true
+                        try {
+                            locationManager.requestLocationUpdates(provider, 2500L, 3f, listener, Looper.getMainLooper())
+                            requestedProvider = true
+                        } catch (_: SecurityException) {
+                            // Continue to NETWORK_PROVIDER if GPS_PROVIDER is not permitted.
+                        }
                     }
                 }
                 // Use the newest cached fix immediately, then keep receiving live GPS/network fixes.
