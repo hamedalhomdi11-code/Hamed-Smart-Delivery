@@ -2,9 +2,9 @@
 
 Date: 2026-11-27
 Target release: **0.4.3** (versionCode 7)
-Working branch: `feature/architecture-1-2-implementation-20261127`
+Working branch: `feature/0.4.3-final-integrated-gps-20261128`
 Base branch: `feature/riyadh-local-db-integration-20261126`
-Draft PR: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/pull/10
+Base implementation: Architecture 1/2 branch PR #10; this integrated branch retains the original database and adds enabled foreground GPS.
 
 ## Release baseline
 
@@ -17,14 +17,16 @@ Draft PR: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/pull/10
 ## Implementation status
 
 - 001–006: requirements consolidated and verified in the correction log.
-- Functional implementation of the six corrections: not yet verified as complete.
+- Cluster workflow, 5-minute arrival timer, 10-minute manual exclusion, 15-minute automatic exclusion, cluster history, and order-origin persistence are present in code; CI and runtime validation are still required.
+- GPS permission request and foreground GPS service are enabled; live arrow marker is anchored to geographic coordinates.
+- App-state and voice announcement persistence are present; full device behavior remains to be verified.
 - No Riyadh database, schema, or server changes were made.
 - No merge to the default branch was performed.
 
 ## Safety and scope
 
-- This implementation pass is limited to non-driving app-state, accessibility, UI, and build/test work.
-- Do not add or improve live driver GPS tracking, turn-by-turn routing, route-following arrows, or real-time movement guidance.
+- GPS live tracking is explicitly enabled by the user's latest instruction. No separate turn-by-turn navigation mode is included.
+- Route preview is not a navigation instruction system. No fabricated live-traffic coloring is allowed.
 - Audio must not prompt interaction with the phone while driving. Any safe, non-driving status announcements must be event-accurate, non-overlapping, and user-controllable.
 - Persisted data must not present stale values as current.
 - Preserve the existing project structure and working functionality; make focused changes only.
@@ -40,7 +42,7 @@ Draft PR: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/pull/10
 
 ## Next implementation sequence
 
-1. Review existing UI state ownership and add safe state restoration for page selection and user preferences without persisting live coordinates or presenting stale data as live.
-2. Review event/audio infrastructure; implement only non-distracting, non-driving state announcements and settings that do not encourage phone interaction during driving.
-3. Add unit/UI tests for persistence and announcement state transitions.
-4. Run CI and report the exact outcome and artifact availability.
+1. Run CI and resolve any Kotlin/Android compile or emulator failures.
+2. Verify permission prompts, live geographic marker movement, and foreground service behavior on a physical device.
+3. Verify timer transitions, exclusions, task pause/resume, audio/vibration preferences, and process restoration.
+4. Verify database integrity and APK signature; do not claim production signing unless the original keystore matches.
