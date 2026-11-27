@@ -283,6 +283,23 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val routeAlertPrefs = remember { context.getSharedPreferences("route_alert_preferences", Context.MODE_PRIVATE) }
     var soundAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("sound", true)) }
     var vibrationAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("vibration", true)) }
+    var welcomeAnnounced by remember { mutableStateOf(false) }
+    LaunchedEffect(speechReady, announcementsEnabled) {
+        if (speechReady && announcementsEnabled && !welcomeAnnounced) {
+            announceArabic("مرحباً بك في حامد سمارت دليفري")
+            welcomeAnnounced = true
+        }
+    }
+    var timerEndAnnouncedAt by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(waitRemainingSeconds, clusterWaitStartedAt, driverSnapshot.mode) {
+        val startedAt = clusterWaitStartedAt
+        if (startedAt != null && driverSnapshot.mode == DriverMode.SEARCHING &&
+            waitRemainingSeconds == 0 && System.currentTimeMillis() >= startedAt + 5 * 60 * 1000L &&
+            timerEndAnnouncedAt != startedAt) {
+            announceArabic("انتهى مؤقت التجمع. يجري الانتقال للبحث عن تجمع آخر")
+            timerEndAnnouncedAt = startedAt
+        }
+    }
     var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
