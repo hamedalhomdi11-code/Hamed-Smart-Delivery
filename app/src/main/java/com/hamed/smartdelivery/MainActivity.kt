@@ -3,11 +3,11 @@ package com.hamed.smartdelivery
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.graphics.Color as AndroidColor
-import android.os.Looper
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -27,7 +27,8 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,7 +77,48 @@ class MainActivity : ComponentActivity() {
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     var driverSnapshot by remember { mutableStateOf(DriverSnapshot()) }
-    var trackingActive by remember { mutableStateOf(false) }
+    var trackingActive by remember {
+        mutableStateOf(context.getSharedPreferences(LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .getBoolean(LocationTrackingService.KEY_ACTIVE, false))
+    }
+    var liveLocation by remember { mutableStateOf<Location?>(null) }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    LocationTrackingService.ACTION_LOCATION_UPDATE -> {
+                        val latitude = intent.getDoubleExtra(LocationTrackingService.EXTRA_LATITUDE, Double.NaN)
+                        val longitude = intent.getDoubleExtra(LocationTrackingService.EXTRA_LONGITUDE, Double.NaN)
+                        if (!latitude.isNaN() && !longitude.isNaN()) {
+                            liveLocation = Location(intent.getStringExtra(LocationTrackingService.EXTRA_PROVIDER) ?: "gps").apply {
+                                this.latitude = latitude
+                                this.longitude = longitude
+                                if (intent.getBooleanExtra(LocationTrackingService.EXTRA_HAS_ACCURACY, false)) {
+                                    accuracy = intent.getFloatExtra(LocationTrackingService.EXTRA_ACCURACY, 0f)
+                                }
+                                if (intent.getBooleanExtra(LocationTrackingService.EXTRA_HAS_BEARING, false)) {
+                                    bearing = intent.getFloatExtra(LocationTrackingService.EXTRA_BEARING, 0f)
+                                }
+                                time = intent.getLongExtra(LocationTrackingService.EXTRA_TIME, System.currentTimeMillis())
+                            }
+                        }
+                    }
+                    LocationTrackingService.ACTION_TRACKING_STATE -> {
+                        trackingActive = intent.getBooleanExtra(LocationTrackingService.EXTRA_TRACKING_ACTIVE, false)
+                    }
+                }
+            }
+        }
+        ContextCompat.registerReceiver(
+            context, receiver,
+            IntentFilter().apply {
+                addAction(LocationTrackingService.ACTION_LOCATION_UPDATE)
+                addAction(LocationTrackingService.ACTION_TRACKING_STATE)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
@@ -119,7 +161,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, liveLocation)
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -179,7 +221,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, liveLocation: Location?) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -187,7 +229,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var routeStatus by remember(destination) { mutableStateOf(if (destination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var routeRequested by remember(destination) { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    var lastCameraLocation by remember { mutableStateOf<Location?>(null) }
+    var hasCenteredOnLocation by remember { mutableStateOf(false) }
     val mapView = remember {
         MapView(context).apply { onCreate(null) }
     }
@@ -238,68 +281,56 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, destination, trackingActive, perspective3D) {
+    LaunchedEffect(mapLibreMap, styleReady, hasLocationPermission, liveLocation, trackingActive, perspective3D) {
         val map = mapLibreMap
-        if (map == null || !styleReady || !hasLocationPermission) {
-            onDispose { }
+        val location = liveLocation
+        if (map == null || !styleReady || !hasLocationPermission || location == null) return@LaunchedEffect
+
+        val point = LatLng(location.latitude, location.longitude)
+        val existing = userMarker
+        if (existing == null) {
+            userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
         } else {
-            val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
-            var firstFix = true
-            var lastCameraLocation: Location? = null
-            val listener = object : LocationListener {
-                override fun onLocationChanged(location: Location) {
-                    val point = LatLng(location.latitude, location.longitude)
-                    val existing = userMarker
-                    if (existing == null) {
-                        userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
-                    } else {
-                        existing.position = point
-                    }
-                    val previousCameraLocation = lastCameraLocation
-                    val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 15f))
-                    if (shouldFollow) {
-                        firstFix = false
-                        val bearing = if (location.hasBearing()) location.bearing.toDouble() else map.cameraPosition.bearing
-                        map.animateCamera(
-                            CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5).tilt(if (perspective3D) 50.0 else 0.0).bearing(bearing).build()
-                            ),
-                            650
-                        )
-                        lastCameraLocation = Location(location)
-                    }
-                    if (destination != null && !routeRequested) {
-                        routeRequested = true
-                        routeStatus = "جارٍ حساب المسار"
-                        scope.launch {
-                            val route = withContext(Dispatchers.IO) {
-                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, destination.latitude, destination.longitude)
-                            }
-                            if (route != null && route.points.size > 1) {
-                                map.addPolyline(
-                                    PolylineOptions().addAll(route.points)
-                                        .color(AndroidColor.rgb(94, 240, 194))
-                                        .width(6f)
-                                )
-                                routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
-                            } else {
-                                routeStatus = "تعذر حساب المسار حالياً"
-                            }
-                        }
-                    }
-                }
-            }
-            try {
-                val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
-                locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
-            } catch (_: SecurityException) {
-                // Permission may be revoked while the map is open.
-            } catch (_: IllegalArgumentException) {
-                // No location provider is available on this device.
-            }
-            onDispose {
-                try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
-            }
+            existing.position = point
+        }
+
+        val previousCameraLocation = lastCameraLocation
+        val shouldFollow = !hasCenteredOnLocation ||
+            (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 15f))
+        if (shouldFollow) {
+            hasCenteredOnLocation = true
+            val bearing = if (location.hasBearing()) location.bearing.toDouble() else map.cameraPosition.bearing
+            map.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder().target(point).zoom(if (destination == null) 16.0 else 14.5)
+                        .tilt(if (perspective3D) 50.0 else 0.0).bearing(bearing).build()
+                ),
+                650
+            )
+            lastCameraLocation = Location(location)
+        }
+    }
+
+    LaunchedEffect(mapLibreMap, styleReady, hasLocationPermission, destination) {
+        val map = mapLibreMap
+        if (map == null || !styleReady || !hasLocationPermission || destination == null) return@LaunchedEffect
+        if (routeRequested) return@LaunchedEffect
+        routeRequested = true
+        routeStatus = "جارٍ انتظار موقع GPS لحساب المسار"
+        val firstFix = snapshotFlow { liveLocation }.filterNotNull().first()
+        routeStatus = "جارٍ حساب المسار"
+        val route = withContext(Dispatchers.IO) {
+            OsrmRouteClient.fetchRoute(firstFix.latitude, firstFix.longitude, destination.latitude, destination.longitude)
+        }
+        if (route != null && route.points.size > 1) {
+            map.addPolyline(
+                PolylineOptions().addAll(route.points)
+                    .color(AndroidColor.rgb(94, 240, 194))
+                    .width(6f)
+            )
+            routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
+        } else {
+            routeStatus = "تعذر حساب المسار حالياً"
         }
     }
 
@@ -499,7 +530,7 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.2.0", color = Muted, fontSize = 10.sp)
+        Text("HAMED SMART DELIVERY • 0.4.3", color = Muted, fontSize = 10.sp)
     }
 }
 

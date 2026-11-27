@@ -11,8 +11,8 @@ android {
         applicationId = "com.hamed.smartdelivery"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 43
+        versionName = "0.4.3"
     }
     buildFeatures { compose = true }
     compileOptions {
