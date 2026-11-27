@@ -402,7 +402,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, recenterRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onRouteChanged = { announceArabic("تم تغيير المسار. يرجى التوجه إلى التجمع الجديد عبر المسار الجديد") }, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, recenterRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onRouteChanged = { announceArabic("تم تغيير المسار. يرجى التوجه إلى التجمع الجديد عبر المسار الجديد") }, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); selectedCluster = null; clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -517,8 +517,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
     var clusterEnteredAt by remember(clusterWaitStartedAt, selectedClusterId) { mutableStateOf(clusterWaitStartedAt) }
     var autoSwitchTriggered by remember { mutableStateOf(false) }
-    LaunchedEffect(manualSwitchRequestId) {
-        if (manualSwitchRequestId > 0) {
+    LaunchedEffect(searchRequestId, manualSwitchRequestId) {
+        if (searchRequestId > 0 || manualSwitchRequestId > 0) {
             currentCluster = null
             clusterEnteredAt = null
             autoSwitchTriggered = false
@@ -612,6 +612,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var discoveryJob: Job? = null
             var routeJob: Job? = null
             var markerAnimationJob: Job? = null
+            var positionAnimationJob: Job? = null
+            var displayedMarkerLocation: LatLng? = null
+            var displayedArrowBearing = 0f
             val restaurantMarkers = linkedMapOf<String, Marker>()
             val pharmacyMarkers = linkedMapOf<String, Marker>()
             val listener = object : LocationListener {
@@ -641,33 +644,53 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
-                    // The live arrow is a geographic map marker: it moves with the user's coordinates.
-                    val arrowBearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing else map.cameraPosition.bearing.toFloat()
+                    // Marker rotation is relative to the map camera, so the arrow points
+                    // toward the top of the screen when the camera follows the driver's heading.
+                    val hasReliableBearing = location.hasBearing() && location.speed >= 1.2f
+                    val targetArrowBearing = if (hasReliableBearing) {
+                        ((location.bearing - map.cameraPosition.bearing.toFloat()) % 360f + 360f) % 360f
+                    } else displayedArrowBearing
                     if (userMarker == null) {
+                        displayedMarkerLocation = point
+                        displayedArrowBearing = targetArrowBearing
+                        lastArrowBearing = targetArrowBearing
                         userMarker = map.addMarker(
                             MarkerOptions().position(point)
-                                .icon(createLocationArrowIcon(context, arrowBearing))
+                                .icon(createLocationArrowIcon(context, targetArrowBearing))
                                 .title("موقعك الحالي")
                         )
                     } else {
-                        userMarker?.position = point
-                        if (lastArrowBearing.isNaN() || kotlin.math.abs(arrowBearing - lastArrowBearing) >= 5f) {
-                            userMarker?.icon = createLocationArrowIcon(context, arrowBearing)
-                        }
-                    }
-                    lastArrowBearing = arrowBearing
-                    if (markerAnimationJob == null) {
-                        markerAnimationJob = scope.launch {
-                            var pulse = 0f
+                        val from = displayedMarkerLocation ?: userMarker!!.position
+                        val fromBearing = displayedArrowBearing
+                        var bearingDelta = ((targetArrowBearing - fromBearing + 540f) % 360f) - 180f
+                        positionAnimationJob?.cancel()
+                        positionAnimationJob = scope.launch {
+                            val started = SystemClock.elapsedRealtime()
+                            val duration = 650L
+                            var lastIconUpdate = 0L
                             while (isActive) {
-                                userMarker?.let { marker ->
-                                    if (!lastArrowBearing.isNaN()) marker.icon = createLocationArrowIcon(context, lastArrowBearing, pulse)
+                                val elapsed = (SystemClock.elapsedRealtime() - started).coerceAtMost(duration)
+                                val linear = elapsed.toFloat() / duration.toFloat()
+                                val eased = linear * linear * (3f - 2f * linear)
+                                val lat = from.latitude + (point.latitude - from.latitude) * eased
+                                val lon = from.longitude + (point.longitude - from.longitude) * eased
+                                userMarker?.position = LatLng(lat, lon)
+                                displayedMarkerLocation = LatLng(lat, lon)
+                                val smoothBearing = (fromBearing + bearingDelta * eased + 360f) % 360f
+                                displayedArrowBearing = smoothBearing
+                                if (elapsed - lastIconUpdate >= 55L || elapsed >= duration) {
+                                    userMarker?.icon = createLocationArrowIcon(context, smoothBearing)
+                                    lastIconUpdate = elapsed
                                 }
-                                pulse = (pulse + 0.2f) % 1f
-                                delay(1100L)
+                                if (elapsed >= duration) break
+                                delay(16L)
                             }
+                            displayedMarkerLocation = point
+                            displayedArrowBearing = targetArrowBearing
+                            lastArrowBearing = targetArrowBearing
                         }
                     }
+                    lastArrowBearing = targetArrowBearing
                     val previousCameraLocation = lastCameraLocation
                     val shouldFollow = followUserCamera && (firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f)))
                     if (shouldFollow) {
@@ -701,6 +724,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         discoveryJob = scope.launch {
                             var retry = 0
                             while (isActive && searchActive && requestId == searchRequestId) {
+                                var foundEligibleCluster = false
                                 try {
                                     val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
                                         context, location.latitude, location.longitude
@@ -720,18 +744,22 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             }
                                         }
                                         val now = System.currentTimeMillis()
-                                        val best = updatedClusters.firstOrNull { cluster ->
+                                        val availableClusters = updatedClusters.filter { cluster ->
+                                            val excludedUntil = excludedClusters[clusterStableId(cluster)]
+                                            excludedUntil == null || excludedUntil <= now
+                                        }
+                                        // Prefer a fresh/known productive cluster, but never stop discovery
+                                        // merely because the repeat-visit preference rejects every candidate.
+                                        val best = availableClusters.firstOrNull { cluster ->
                                             val id = clusterStableId(cluster)
-                                            val excludedUntil = excludedClusters[id]
-                                            val isExcluded = excludedUntil != null && excludedUntil > now
                                             val lastVisit = visitedClusterIds.indexOfLast { it == id }
                                             val otherVisits = if (lastVisit < 0) 4 else visitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
-                                            val repeatAllowed = lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
-                                            !isExcluded && repeatAllowed
-                                        } ?: run {
-                                            routeStatus = "جميع التجمعات القريبة مستبعدة مؤقتاً أو لم يحن وقت تكرارها"
-                                            return@findNearestClustersStreaming
+                                            lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
+                                        } ?: availableClusters.firstOrNull() ?: run {
+                                            routeStatus = "التجمعات القريبة مستبعدة مؤقتاً • مستمر في البحث عن تجمع آخر"
+                                            return@findNearestClusterStreaming
                                         }
+                                        foundEligibleCluster = true
                                         if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
                                             currentCluster = best
                                             clusterEnteredAt = if (clusterStableId(best) == selectedClusterId) clusterWaitStartedAt else null
@@ -797,8 +825,10 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             existingPharmacy.title = "صيدلية • ${pharmacy.name}"
                                         }
                                     }
-                                    if (clusters.isNotEmpty()) break
-                                    routeStatus = "لم تصل نتائج بعد • مستمر في البحث"
+                                    if (foundEligibleCluster) break
+                                    routeStatus = if (clusters.isNotEmpty())
+                                        "لم يتوفر تجمع صالح بعد • مستمر في البحث عن تجمع آخر"
+                                    else "لم تصل نتائج بعد • مستمر في البحث"
                                 } catch (error: Exception) {
                                     routeStatus = "تعذر مصدر مؤقتاً • مستمر في إعادة المحاولة"
                                 }
@@ -894,6 +924,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 discoveryJob?.cancel()
                 routeJob?.cancel()
                 markerAnimationJob?.cancel()
+                positionAnimationJob?.cancel()
                 restaurantMarkers.values.forEach { map.removeMarker(it) }
                 restaurantMarkers.clear()
                 pharmacyMarkers.values.forEach { map.removeMarker(it) }
