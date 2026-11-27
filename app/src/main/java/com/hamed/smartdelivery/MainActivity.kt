@@ -152,6 +152,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var excludedClusters by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     var visitedClusterIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var clusterWaitStartedAt by remember { mutableStateOf<Long?>(null) }
+    var waitRemainingSeconds by remember { mutableIntStateOf(0) }
     val routeAlertPrefs = remember { context.getSharedPreferences("route_alert_preferences", Context.MODE_PRIVATE) }
     var soundAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("sound", true)) }
     var vibrationAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("vibration", true)) }
@@ -181,6 +183,18 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         val requested = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
         locationPermissionLauncher.launch(requested.toTypedArray())
+    }
+    LaunchedEffect(clusterWaitStartedAt, driverSnapshot.mode) {
+        val startedAt = clusterWaitStartedAt
+        if (startedAt == null || driverSnapshot.mode != DriverMode.SEARCHING) {
+            waitRemainingSeconds = 0
+        } else {
+            while (driverSnapshot.mode == DriverMode.SEARCHING && clusterWaitStartedAt == startedAt) {
+                waitRemainingSeconds = ((startedAt + 5 * 60 * 1000L - System.currentTimeMillis()) / 1000L)
+                    .coerceAtLeast(0L).toInt()
+                delay(1000L)
+            }
+        }
     }
     // Ask for GPS permission on first launch; Android still controls the permission dialog.
     LaunchedEffect(Unit) {
@@ -216,7 +230,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) visitedClusterIds = visitedClusterIds + id }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); searchRequestId += 1 })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) visitedClusterIds = visitedClusterIds + id; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -232,7 +246,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    if (!mapExpanded) Dashboard(driverSnapshot, english, onManualSwitch = { selectedCluster?.let { cluster -> excludedClusters = excludedClusters + (clusterStableId(cluster) to (System.currentTimeMillis() + 10 * 60 * 1000L)); selectedCluster = null; manualSwitchRequestId += 1; searchRequestId += 1 } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
+                    if (!mapExpanded) Dashboard(driverSnapshot, english, waitRemainingSeconds, onManualSwitch = { selectedCluster?.let { cluster -> excludedClusters = excludedClusters + (clusterStableId(cluster) to (System.currentTimeMillis() + 10 * 60 * 1000L)); selectedCluster = null; clusterWaitStartedAt = null; manualSwitchRequestId += 1; searchRequestId += 1 } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
                             requestLocationPermissions()
@@ -245,12 +259,14 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         if (transition.accepted) {
                             when (command) {
                                 DriverCommand.OrderReceived -> {
+                                    clusterWaitStartedAt = null
                                     selectedCluster?.let { cluster ->
                                         runCatching { OrderClusterDatabase(context).recordOrder(cluster) }
                                         orderProducingClusterIds = orderProducingClusterIds + clusterStableId(cluster)
                                     }
                                 }
                                 DriverCommand.CompleteDelivery -> {
+                                    clusterWaitStartedAt = null
                                     // A fresh request ID restarts discovery after the delivery pause.
                                     searchRequestId += 1
                                 }
@@ -833,7 +849,7 @@ private fun MapAction(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 }
 
 @Composable
-private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
+private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingSeconds: Int, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
     val mode = snapshot.mode
     val title = when (mode) {
         DriverMode.IDLE -> if (english) "Ready" else "جاهز للبحث"
@@ -889,6 +905,10 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onManualSwitch
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Mint)) {
                     Text(if (english) "RESET EXCLUSIONS" else "إعادة تهيئة التجمعات", fontSize = 10.sp)
                 }
+            }
+            if (waitRemainingSeconds > 0) {
+                val timerText = String.format(Locale.US, "%02d:%02d", waitRemainingSeconds / 60, waitRemainingSeconds % 60)
+                Text(if (english) "Cluster wait: $timerText" else "وقت انتظار التجمع: $timerText", color = Color(0xFFFFC66D), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(5.dp))
             Text(if (english) "The app keeps searching between suitable clusters automatically." else "يستمر التطبيق في البحث والتنقل بين التجمعات تلقائياً.", color = Muted, fontSize = 10.sp)
