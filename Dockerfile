@@ -24,7 +24,7 @@ RUN set -e; \
     cp data/output/riyadh-build-report.json /srv/riyadh-build-report.json; \
     APK_SIZE=$(stat -c '%s' "$APK"); \
     APK_SHA256=$(sha256sum "$APK" | cut -d' ' -f1); \
-    printf '{"versionName":"0.4.3","variant":"debug","apkSizeBytes":%s,"apkSha256":"%s","riyadhDatabaseAsset":"verified","signature":"verified"}\\n' "$APK_SIZE" "$APK_SHA256" > /srv/apk-build-report.json; \
+    printf '{"versionName":"0.4.3","variant":"debug","apkSizeBytes":%s,"apkSha256":"%s","riyadhDatabaseAsset":"verified","signature":"verified"}\n' "$APK_SIZE" "$APK_SHA256" > /srv/apk-build-report.json;
     cat /srv/apk-build-report.json
 EXPOSE 10000
 CMD ["python3", "/workspace/scripts/serve_apk.py"]
