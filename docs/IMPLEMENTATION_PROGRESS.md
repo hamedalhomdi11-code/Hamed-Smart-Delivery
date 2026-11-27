@@ -71,3 +71,20 @@ Verification status for this recovery patch:
 - The geographic arrow now has a lightweight pulse/glow animation (paused during position interpolation to avoid icon-update contention); route previews use a neutral line color rather than implying live traffic conditions.
 - Cluster retries now use the latest GPS fix rather than reusing the first callback's coordinates; cached location is used only when it is no older than two minutes, preventing a stale last-known position from pinning discovery to the wrong part of the map.
 - Android package versionCode is incremented from 7 to 8 while versionName remains 0.4.3, so this recovery APK is a forward update rather than a same-code rebuild.
+
+## Second-stage recovery findings — 2026-11-28
+
+A deeper pass found a concrete cluster-selection defect: `RestaurantDiscoveryClient` truncated every radius batch to the first 30 ranked candidates (and the wide-area fallback to the nearest 30) before the caller could apply exclusion and four-other-clusters repeat rules. If those 30 were ineligible, valid clusters later in the same Riyadh database were never evaluated. The callback now receives every candidate in the radius and the full coverage fallback; the map still renders only a small marker subset.
+
+Route calculation now tries the primary OSRM demo and a secondary FOSSGIS OSRM car endpoint when the first provider times out or cannot return a route. Both are public best-effort demo services, not production SLAs; public usage should remain light and a self-hosted router is the long-term reliable option.
+
+GPS control was hardened:
+- The map now exposes the same tracking toggle as Profile, so start/stop is directly accessible without leaving the map.
+- The toggle reads the persisted foreground-service state at click time rather than trusting a possibly stale Compose state.
+- Start/stop exceptions are surfaced to the user instead of silently appearing as an unresponsive button.
+- The foreground service logs explicit start/stop and provider failures, removes GPS updates and the foreground notification on stop, and cleans up when no location provider is enabled.
+
+Verification:
+- These changes are committed on the existing feature branch only.
+- A fresh Render build against the latest branch head is required; the earlier in-progress deploy used an older commit and does not include these changes.
+- Physical-device start/stop, GPS fix, database import and road-route rendering still require confirmation on the user's phone.
