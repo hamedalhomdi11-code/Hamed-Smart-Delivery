@@ -525,10 +525,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
-    var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
     var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
-    var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
-    var currentStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
     var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
     var clusterEnteredAt by remember(clusterWaitStartedAt, selectedClusterId) { mutableStateOf(clusterWaitStartedAt) }
@@ -679,9 +676,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         pharmacyMarkers.values.toList().forEach { map.removeMarker(it) }
                         pharmacyMarkers.clear()
                         routePoints = emptyList()
-                        routeSteps = emptyList()
-                        currentStepIndex = 0
-                        nextTurnInstruction = ""
                         activeDestination = null
                         routeRequested = false
                         discoveryJob?.cancel()
@@ -755,9 +749,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                             .color(AndroidColor.rgb(94, 240, 194)).width(6f)
                                                     )
                                                     routePoints = route.points
-                                                    routeSteps = route.steps
-                                                    currentStepIndex = 0
-                                                    nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                 } else if (requestId == searchRequestId) {
@@ -813,10 +804,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         .width(6f)
                                 )
                                 routePoints = route.points
-                                routeSteps = route.steps
-                                currentStepIndex = 0
-                                nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                routeStatus = "تم رسم المسار • اضغط ابدأ الملاحة لبدء التوجيه"
+                                routeStatus = "تم رسم المسار"
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
                             } else {
                                 routeRequested = false
@@ -836,27 +824,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     val currentRoute = routePoints
-                    if (navigationActive && currentRoute.size > 3) {
-                        var nearestIndex = 0
-                        var nearestOnRoute = Float.MAX_VALUE
-                        currentRoute.forEachIndexed { index, routePoint ->
-                            val result = FloatArray(1)
-                            Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
-                            if (result[0] < nearestOnRoute) {
-                                nearestOnRoute = result[0]
-                                nearestIndex = index
-                            }
-                        }
-                        if (nearestIndex >= 3 && nearestOnRoute <= 70f && currentRoute.size - nearestIndex >= 2) {
-                            val remaining = currentRoute.drop(nearestIndex)
-                            routePoints = remaining
-                            displayedRoutePolyline?.let { map.removePolyline(it) }
-                            displayedRoutePolyline = map.addPolyline(
-                                PolylineOptions().addAll(remaining)
-                                    .color(AndroidColor.rgb(94, 240, 194)).width(6f)
-                            )
-                        }
-                    }
+
                     if (activeDestination != null && currentRoute.size > 1) {
                         val nearestDistance = currentRoute.minOf { routePoint ->
                             val result = FloatArray(1)
@@ -880,11 +848,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             .width(6f)
                                     )
                                     routePoints = updated.points
-                                    routeSteps = updated.steps
-                                    currentStepIndex = 0
-                                    nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
                                     alertRouteChanged(context, soundAlertsEnabled, vibrationAlertsEnabled)
-                                    if (ttsReady && soundAlertsEnabled) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
                                 } else {
                                     routeStatus = "تعذر تحديث المسار حالياً"
