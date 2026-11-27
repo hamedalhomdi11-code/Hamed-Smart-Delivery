@@ -35,6 +35,17 @@ class OrderClusterDatabase(context: Context) : SQLiteOpenHelper(
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
+    fun orderProducingClusterIds(): Set<String> {
+        val ids = linkedSetOf<String>()
+        readableDatabase.rawQuery(
+            "SELECT cluster_id FROM order_cluster_totals WHERE order_count > 0",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) ids += cursor.getString(0)
+        }
+        return ids
+    }
+
     fun recordOrder(cluster: RestaurantCluster, occurredAtEpochMs: Long = System.currentTimeMillis()) {
         val id = cluster.clusterId?.takeIf { it.isNotBlank() }
             ?: "geo:${"%.5f".format(java.util.Locale.US, cluster.latitude)}:${"%.5f".format(java.util.Locale.US, cluster.longitude)}"
