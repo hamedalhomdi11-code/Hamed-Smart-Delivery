@@ -738,9 +738,11 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             var retry = 0
                             while (isActive && searchActive && requestId == searchRequestId) {
                                 var foundEligibleCluster = false
+                                // Re-read the newest fix on every retry; never keep querying from a stale cached coordinate.
+                                val searchLocation = latestUserLocation?.let { Location(it) } ?: Location(location)
                                 try {
                                     val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
-                                        context, location.latitude, location.longitude
+                                        context, searchLocation.latitude, searchLocation.longitude
                                     ) { updatedClusters ->
                                         if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming false
                                         updatedClusters.take(8).forEach { cluster ->
@@ -800,7 +802,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             routeJob = scope.launch {
                                                 val route = withContext(Dispatchers.IO) {
                                                     OsrmRouteClient.fetchRoute(
-                                                        location.latitude, location.longitude,
+                                                        searchLocation.latitude, searchLocation.longitude,
                                                         nextDestination.latitude, nextDestination.longitude
                                                     )
                                                 }
@@ -825,7 +827,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     }
                                     val nearbyPharmacies = withContext(Dispatchers.IO) {
                                         RiyadhPlacesDatabase.nearestPharmacies(
-                                            context, location.latitude, location.longitude, radiusMeters = 5000, limit = 30
+                                            context, searchLocation.latitude, searchLocation.longitude, radiusMeters = 5000, limit = 30
                                         )
                                     }
                                     nearbyPharmacies.forEach { pharmacy ->
@@ -929,7 +931,10 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 val cachedFix = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
                     .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
                     .maxByOrNull { it.time }
-                cachedFix?.let { listener.onLocationChanged(it) }
+                cachedFix?.takeIf {
+                    it.time > 0L && System.currentTimeMillis() >= it.time &&
+                        System.currentTimeMillis() - it.time <= 120_000L
+                }?.let { listener.onLocationChanged(it) }
                 if (!requestedProvider) routeStatus = "يرجى تفعيل خدمة الموقع GPS من إعدادات الهاتف"
             } catch (_: SecurityException) {
                 // Permission may be revoked while the map is open.
