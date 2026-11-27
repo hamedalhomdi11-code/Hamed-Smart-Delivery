@@ -53,7 +53,7 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-debug-signature.txt
-      - name: Configure permanent 0.4.2 release signing key
+      - name: Configure permanent 0.4.3 release signing key
         id: signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -67,9 +67,9 @@ jobs:
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Release APK not produced yet. Configure the four permanent 0.4.2 signing secrets."
+            echo "::warning::Release APK not produced yet. Configure the four permanent 0.4.3 signing secrets."
           fi
-      - name: Build APK signed with the permanent 0.4.2 key
+      - name: Build APK signed with the permanent 0.4.3 key
         if: steps.signing.outputs.enabled == 'true'
         env:
           HAMED_KEYSTORE_FILE: ${{ runner.temp }}/hamed-release.jks
@@ -84,7 +84,7 @@ jobs:
       - name: Upload APKs and signature reports
         uses: actions/upload-artifact@v4
         with:
-          name: hamed-smart-delivery-0.4.2-build
+          name: hamed-smart-delivery-0.4.3-build
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release.apk
