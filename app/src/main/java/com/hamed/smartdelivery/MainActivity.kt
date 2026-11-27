@@ -280,16 +280,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             previousDriverMode = driverSnapshot.mode
         }
     }
-    var previousSearchRequestId by remember { mutableIntStateOf(searchRequestId) }
-    var previousSearchMode by remember { mutableStateOf(driverSnapshot.mode) }
-    LaunchedEffect(searchRequestId, driverSnapshot.mode) {
-        if (searchRequestId > previousSearchRequestId &&
-            driverSnapshot.mode == DriverMode.SEARCHING && previousSearchMode == DriverMode.SEARCHING) {
-            announceArabic("تم تغيير التجمع. يجري البحث عن التجمع التالي")
-        }
-        previousSearchRequestId = searchRequestId
-        previousSearchMode = driverSnapshot.mode
-    }
     LaunchedEffect(clusterWaitStartedAt) {
         if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
             announceArabic("بدأ مؤقت انتظار التجمع لمدة خمس دقائق")
@@ -324,16 +314,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (speechReady && announcementsEnabled && !welcomeAnnounced) {
             announceArabic("مرحباً بك في حامد سمارت دليفري")
             welcomeAnnounced = true
-        }
-    }
-    var timerEndAnnouncedAt by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(waitRemainingSeconds, clusterWaitStartedAt, driverSnapshot.mode) {
-        val startedAt = clusterWaitStartedAt
-        if (startedAt != null && driverSnapshot.mode == DriverMode.SEARCHING &&
-            waitRemainingSeconds == 0 && System.currentTimeMillis() >= startedAt + 5 * 60 * 1000L &&
-            timerEndAnnouncedAt != startedAt) {
-            announceArabic("انتهى مؤقت التجمع. يجري الانتقال للبحث عن تجمع آخر")
-            timerEndAnnouncedAt = startedAt
         }
     }
     var pendingSearchAfterPermission by remember { mutableStateOf(false) }
@@ -421,7 +401,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -445,6 +425,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         clusterWaitStartedAt = null
                         manualSwitchRequestId += 1
                         searchRequestId += 1
+                        announceArabic("تم استبعاد التجمع السابق لمدة عشر دقائق. يجري البحث عن التجمع التالي")
                     } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
