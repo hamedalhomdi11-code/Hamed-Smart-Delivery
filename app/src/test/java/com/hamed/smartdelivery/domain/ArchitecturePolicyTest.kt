@@ -4,12 +4,9 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ArchitecturePolicyTest {
-    @Test fun gpsCycleMatchesAgreedFourPresses() {
-        var mode = GpsMode.STOPPED
-        mode = GpsModeCycle.next(mode); assertEquals(GpsMode.TRACKING, mode)
-        mode = GpsModeCycle.next(mode); assertEquals(GpsMode.NAVIGATION, mode)
-        mode = GpsModeCycle.next(mode); assertEquals(GpsMode.STOPPED, mode)
-        mode = GpsModeCycle.next(mode); assertEquals(GpsMode.TRACKING, mode)
+    @Test fun gpsModeHasOnlyStoppedAndTrackingStates() {
+        assertEquals(GpsMode.TRACKING, GpsModeCycle.next(GpsMode.STOPPED))
+        assertEquals(GpsMode.STOPPED, GpsModeCycle.next(GpsMode.TRACKING))
     }
 
     @Test fun waitBeginsAtClusterEntryAndExpiresAfterFiveMinutes() {
@@ -17,6 +14,23 @@ class ArchitecturePolicyTest {
         assertFalse(ClusterPolicy.shouldAutoExclude(wait.copy(enteredAtEpochMillis = null), 999999L))
         assertFalse(ClusterPolicy.shouldAutoExclude(wait, 1000L + ClusterPolicy.WAIT_MILLIS - 1))
         assertTrue(ClusterPolicy.shouldAutoExclude(wait, 1000L + ClusterPolicy.WAIT_MILLIS))
+    }
+
+    @Test fun pausedTimeDoesNotCountTowardClusterWait() {
+        val entered = ClusterPolicy.enterCluster("a", 1000L)
+        val paused = ClusterPolicy.pause(entered, 60_000L)
+        assertFalse(ClusterPolicy.shouldAutoExclude(paused, 400_000L))
+        val resumed = ClusterPolicy.resume(paused, 120_000L)
+        assertEquals(61_000L, resumed.enteredAtEpochMillis)
+        assertFalse(ClusterPolicy.shouldAutoExclude(resumed, 360_999L))
+        assertTrue(ClusterPolicy.shouldAutoExclude(resumed, 361_000L))
+    }
+
+    @Test fun manualSwitchIsNotAllowedBeforeTenMinutes() {
+        val wait = ClusterPolicy.enterCluster("a", 1000L)
+        assertFalse(ClusterPolicy.canManualSwitch(wait, 1000L + ClusterPolicy.MANUAL_EXCLUSION_MILLIS - 1))
+        assertTrue(ClusterPolicy.canManualSwitch(wait, 1000L + ClusterPolicy.MANUAL_EXCLUSION_MILLIS))
+        assertFalse(ClusterPolicy.canManualSwitch(ClusterPolicy.pause(wait, 30_000L), 900_000L))
     }
 
     @Test fun manualAndAutomaticExclusionDurationsDiffer() {
