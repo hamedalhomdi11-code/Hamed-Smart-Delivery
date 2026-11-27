@@ -201,7 +201,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             announcementsSpeech.setSpeechRate(1.0f)
             announcementsSpeech.speak(message, TextToSpeech.QUEUE_FLUSH,
                 android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, announcementVolume) },
-                "hamed-event-\u0024{message.hashCode()}")
+                "hamed-event")
         }
     }
     val restoredDriverMode = remember {
