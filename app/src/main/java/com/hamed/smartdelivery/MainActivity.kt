@@ -15,6 +15,7 @@ import android.location.LocationManager
 import android.graphics.Color as AndroidColor
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.os.Looper
 import android.os.SystemClock
 import android.os.Build
@@ -522,6 +523,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
+    var lastArrowBearing by remember { mutableFloatStateOf(Float.NaN) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
@@ -633,14 +635,16 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     if (userMarker == null) {
                         userMarker = map.addMarker(
                             MarkerOptions().position(point)
-                                .icon(createLocationArrowIcon(context))
-                                .rotation(arrowBearing)
+                                .icon(createLocationArrowIcon(context, arrowBearing))
                                 .title("موقعك الحالي")
                         )
                     } else {
                         userMarker?.position = point
-                        userMarker?.rotation = arrowBearing
+                        if (lastArrowBearing.isNaN() || kotlin.math.abs(arrowBearing - lastArrowBearing) >= 5f) {
+                            userMarker?.icon = createLocationArrowIcon(context, arrowBearing)
+                        }
                     }
+                    lastArrowBearing = arrowBearing
                     val previousCameraLocation = lastCameraLocation
                     val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
                     if (shouldFollow) {
@@ -895,12 +899,13 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     }
 }
 
-private fun createLocationArrowIcon(context: Context): org.maplibre.android.annotations.Icon {
+private fun createLocationArrowIcon(context: Context, bearing: Float): org.maplibre.android.annotations.Icon {
     val drawable = ContextCompat.getDrawable(context, R.drawable.ic_location_arrow)
         ?: error("Location arrow drawable is missing")
     val bitmap = Bitmap.createBitmap(72, 72, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, 72, 72)
+    canvas.rotate(bearing, 36f, 36f)
     drawable.draw(canvas)
     return IconFactory.getInstance(context).fromBitmap(bitmap)
 }
