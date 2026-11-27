@@ -4,6 +4,8 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.ln
+import com.hamed.smartdelivery.domain.ClusterCandidate
+import com.hamed.smartdelivery.domain.ClusterScoring
 
 data class RestaurantCluster(
     val latitude: Double,
@@ -37,8 +39,11 @@ object RestaurantDiscoveryClient {
             "إحداثيات خط الطول غير صالحة"
         }
 
-        val allClusters = withContext(Dispatchers.IO) {
-            RiyadhPlacesDatabase.foodClusters(context)
+        val (allClusters, observedStats) = withContext(Dispatchers.IO) {
+            val places = RiyadhPlacesDatabase.foodClusters(context)
+            val orderDatabase = OrderClusterDatabase(context)
+            val stats = try { orderDatabase.orderStats() } finally { orderDatabase.close() }
+            places to stats
         }
         val radii = listOf(1000, 3000, radiusMeters.coerceIn(3000, 15000)).distinct().sorted()
         var best: List<RestaurantCluster> = emptyList()
@@ -52,15 +57,31 @@ object RestaurantDiscoveryClient {
                     searchRadiusMeters = radius
                 )
             }.filter { it.distanceMeters <= radius }
-                .sortedWith(
-                    compareBy<RestaurantCluster> {
-                        it.distanceMeters / (1.0 + ln(1.0 + it.restaurantCount.coerceAtLeast(0)))
-                    }.thenByDescending { it.restaurantCount }
+
+            val now = System.currentTimeMillis()
+            val rankedIds = ClusterScoring.rank(nearby.map { cluster ->
+                val id = cluster.clusterId?.takeIf { it.isNotBlank() }
+                    ?: "geo:" + String.format(java.util.Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
+                val observed = observedStats[id]
+                ClusterCandidate(
+                    id = id,
+                    distanceKm = cluster.distanceMeters / 1000.0,
+                    restaurantCount = cluster.restaurantCount,
+                    observedOrders = observed?.orderCount ?: 0,
+                    hoursSinceLastObservedOrder = observed?.let { (now - it.lastOrderAtEpochMs).coerceAtLeast(0L) / 3_600_000.0 },
+                    publicRating = null,
+                    estimatedFuelCostSar = null
                 )
+            }).mapIndexed { index, ranked -> ranked.candidate.id to ranked.score }.toMap()
+            val sortedNearby = nearby.sortedByDescending { cluster ->
+                val id = cluster.clusterId?.takeIf { it.isNotBlank() }
+                    ?: "geo:" + String.format(java.util.Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
+                rankedIds[id] ?: 0.0
+            }
 
             if (nearby.isNotEmpty()) {
-                best = nearby
-                onUpdate(nearby.take(30))
+                best = sortedNearby
+                onUpdate(sortedNearby.take(30))
             }
         }
         return best
