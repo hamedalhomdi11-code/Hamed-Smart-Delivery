@@ -82,8 +82,8 @@ private val Mint = Color(0xFF5EF0C2)
 private val Cyan = Color(0xFF53C7F4)
 private val Muted = Color(0xFF8EA5B8)
 
-private fun alertRouteChanged(context: Context) {
-    runCatching {
+private fun alertRouteChanged(context: Context, soundEnabled: Boolean, vibrationEnabled: Boolean) {
+    if (vibrationEnabled) runCatching {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             context.getSystemService(VibratorManager::class.java).defaultVibrator
         } else {
@@ -94,7 +94,7 @@ private fun alertRouteChanged(context: Context) {
             vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 220, 100, 220), -1))
         }
     }
-    runCatching {
+    if (soundEnabled) runCatching {
         val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90)
         tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 850)
         Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, 1000L)
@@ -145,6 +145,9 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var mapExpanded by remember { mutableStateOf(false) }
     var searchRequestId by remember { mutableIntStateOf(0) }
     var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
+    val routeAlertPrefs = remember { context.getSharedPreferences("route_alert_preferences", Context.MODE_PRIVATE) }
+    var soundAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("sound", true)) }
+    var vibrationAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("vibration", true)) }
     var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -206,7 +209,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, onClusterSelected = { selectedCluster = it })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, onClusterSelected = { selectedCluster = it })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -254,7 +257,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         when (selected) {
                             1 -> OrdersScreen(driverSnapshot, english)
                             2 -> PlacesScreen(english)
-                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking)
+                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() })
                         }
                     }
                 }
@@ -318,7 +321,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, onClusterSelected: (RestaurantCluster) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, onClusterSelected: (RestaurantCluster) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -396,7 +399,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, perspective3D, searchRequestId, searchActive) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, searchActive) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission) {
             onDispose { }
@@ -632,7 +635,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     routeSteps = updated.steps
                                     currentStepIndex = 0
                                     nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                    alertRouteChanged(context)
+                                    alertRouteChanged(context, soundAlertsEnabled, vibrationAlertsEnabled)
                                     if (ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
                                 } else {
@@ -862,7 +865,7 @@ private fun PlacesScreen(english: Boolean) {
 }
 
 @Composable
-private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit) {
+private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(if (english) "PROFILE & SETTINGS" else "حسابي والإعدادات", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleLanguage() }) {
@@ -884,7 +887,25 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.4.0", color = Muted, fontSize = 10.sp)
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (english) "Route change sound" else "صوت تغيير المسار", color = Color.White)
+                    Text(if (english) "Audible warning when route changes" else "تنبيه صوتي عند إعادة حساب المسار", color = Muted, fontSize = 11.sp)
+                }
+                Switch(checked = soundAlertsEnabled, onCheckedChange = onSoundChange)
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (english) "Route change vibration" else "اهتزاز تغيير المسار", color = Color.White)
+                    Text(if (english) "Vibration warning when route changes" else "اهتزاز متزامن مع التنبيه الصوتي", color = Muted, fontSize = 11.sp)
+                }
+                Switch(checked = vibrationAlertsEnabled, onCheckedChange = onVibrationChange)
+            }
+        }
+        Text("HAMED SMART DELIVERY • 0.4.2", color = Muted, fontSize = 10.sp)
     }
 }
 
