@@ -88,3 +88,4 @@ Verification:
 - These changes are committed on the existing feature branch only.
 - A fresh Render build against the latest branch head is required; the earlier in-progress deploy used an older commit and does not include these changes.
 - Physical-device start/stop, GPS fix, database import and road-route rendering still require confirmation on the user's phone.
+- Follow-up hardening: the map itself now exposes the GPS toggle; the toggle reads persisted service state and displays exceptions; GPS service start/stop and provider failures are logged; the no-provider path no longer recreates an orphaned ongoing notification after stopping.
