@@ -757,7 +757,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
                                         } ?: availableClusters.firstOrNull() ?: run {
                                             routeStatus = "التجمعات القريبة مستبعدة مؤقتاً • مستمر في البحث عن تجمع آخر"
-                                            return@findNearestClusterStreaming
+                                            return@findNearestClustersStreaming
                                         }
                                         foundEligibleCluster = true
                                         if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
