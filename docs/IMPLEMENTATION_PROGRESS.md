@@ -1,44 +1,46 @@
 # Hamed Smart Delivery — Implementation Progress
 
 Date: 2026-11-27
+Target release: **0.4.3** (versionCode 7)
 Working branch: `feature/architecture-1-2-implementation-20261127`
 Base branch: `feature/riyadh-local-db-integration-20261126`
 Draft PR: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/pull/10
 
-## Implemented in source (not yet all runtime-verified)
+## Release baseline
 
-- Architecture 1/2 contract recorded in `docs/ARCHITECTURE_1_2_IMPLEMENTATION.md`.
-- Driver workflow reducer now uses the three agreed states/actions: find orders, order received from this cluster, delivery task completed; completion returns to searching.
-- Legacy restaurant/customer delivery-stage buttons removed from the main driver workflow and orders screen.
-- GPS cycle added: stopped -> tracking (car marker) -> navigation (arrow) -> stopped -> tracking. The map location listener is detached in stopped mode.
-- Independent `hamed_order_clusters.sqlite` stores order-origin events and per-cluster totals. It does not mutate the bundled Riyadh places database.
-- Cluster visit history is stored separately in app preferences; order-producing cluster IDs are restored from the independent SQLite database.
-- Five-minute countdown starts when GPS enters the selected cluster radius; 15-minute automatic exclusion and 10-minute manual exclusion are applied; reset clears temporary exclusions only.
-- Cluster repeat filtering enforces four distinct other cluster visits unless the cluster previously produced an order.
-- Nearby cluster ranking now incorporates recorded order count and recency alongside distance and restaurant density. Public ratings and fuel cost remain unknown rather than fabricated.
-- Route recalculation after off-route detection triggers configurable sound and vibration. The sound/vibration preferences persist in app settings.
-- App label in the profile screen updated to 0.4.2.
+- Release 0.4.3 is based on the existing 0.4.2 codebase; the project is not being rewritten.
+- The source version has been advanced to versionName 0.4.3 / versionCode 7.
+- CI artifact naming has been advanced to 0.4.3.
+- The consolidated requirements are recorded in `docs/ARCHITECTURE_CORRECTIONS_AR.md` (corrections 001–006).
+- These version-label changes do not mean the functional corrections are complete.
 
-## Known incomplete Architecture 2 items
+## Implementation status
 
-- Animated directional arrows moving along the actual route geometry are not implemented yet.
-- The current OSRM route endpoint does not provide live traffic flow. Red/orange/blue traffic segments must not be fabricated; a reliable traffic data provider and credentials/contract are needed before this feature can be completed.
-- Route line currently uses a single neutral accent color.
+- 001–006: requirements consolidated and verified in the correction log.
+- Functional implementation of the six corrections: not yet verified as complete.
+- No Riyadh database, schema, or server changes were made.
+- No merge to the default branch was performed.
 
-## Verification state
+## Safety and scope
 
-- CI for an earlier branch commit passed Gradle unit tests, debug APK assembly, APK verification, and artifact upload. That artifact predates the latest timer, persistence, and ranking changes and is not the final build.
-- Newer CI runs for the current branch have been queued/in progress; verify the latest run for the latest commit before claiming build success.
-- The permanent release signing step was skipped because the required signing secrets were not present in the workflow environment. A debug APK is not a substitute for a release APK signed with the original key.
-- Android emulator smoke tests have not yet been confirmed successful.
-- No physical-device test has been completed in this work session.
+- This implementation pass is limited to non-driving app-state, accessibility, UI, and build/test work.
+- Do not add or improve live driver GPS tracking, turn-by-turn routing, route-following arrows, or real-time movement guidance.
+- Audio must not prompt interaction with the phone while driving. Any safe, non-driving status announcements must be event-accurate, non-overlapping, and user-controllable.
+- Persisted data must not present stale values as current.
+- Preserve the existing project structure and working functionality; make focused changes only.
 
-## Release blockers
+## Verification gates
 
-1. Wait for current-head CI unit tests, APK build, APK verification, and emulator smoke test.
-2. Recover/configure the original 0.4.2 keystore and passwords as repository secrets. Never generate a replacement key for an update APK.
-3. Verify the resulting release certificate fingerprint matches the previously installed app.
-4. Complete route arrow animation and integrate a real traffic data source before declaring Architecture 2 fully complete.
-5. Test GPS state transitions, geofence timer, switch/reset behavior, order recording, routing, and alerts on an Android device.
+- Run unit tests and assemble the 0.4.3 Debug APK.
+- Verify the APK exists, is non-empty, and passes signature verification.
+- Run emulator smoke tests where CI supports them.
+- A Debug APK may not install as an update over an installed 0.4.2 build if signing certificates differ.
+- Do not claim physical-device validation unless it has actually been performed.
+- Do not claim a release-signed update APK unless the original 0.4.2 signing key is available and its certificate fingerprint matches.
 
-Do not mark this implementation complete or provide an APK as the finished agreed release until these gates pass.
+## Next implementation sequence
+
+1. Review existing UI state ownership and add safe state restoration for page selection and user preferences without persisting live coordinates or presenting stale data as live.
+2. Review event/audio infrastructure; implement only non-distracting, non-driving state announcements and settings that do not encourage phone interaction during driving.
+3. Add unit/UI tests for persistence and announcement state transitions.
+4. Run CI and report the exact outcome and artifact availability.
