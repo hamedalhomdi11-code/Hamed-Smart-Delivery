@@ -25,61 +25,71 @@ data class RouteResult(
  */
 object OsrmRouteClient {
     fun fetchRoute(startLatitude: Double, startLongitude: Double, endLatitude: Double, endLongitude: Double): RouteResult? {
-        val endpoint = "https://router.project-osrm.org/route/v1/driving/" +
-            "$startLongitude,$startLatitude;$endLongitude,$endLatitude?overview=full&geometries=geojson&steps=true"
-        var connection: HttpURLConnection? = null
-        return try {
-            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 12000
-                readTimeout = 18000
-                setRequestProperty("User-Agent", "HamedSmartDelivery/0.3.0 (Android)")
-                setRequestProperty("Accept", "application/json")
-            }
-            if (connection.responseCode !in 200..299) return null
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val root = JSONObject(body)
-            if (root.optString("code") != "Ok") return null
-            val route = root.getJSONArray("routes").optJSONObject(0) ?: return null
-            val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
-            val points = buildList {
-                for (index in 0 until coordinates.length()) {
-                    val pair = coordinates.getJSONArray(index)
-                    add(LatLng(pair.getDouble(1), pair.getDouble(0)))
+        // Two independent public OSRM demo endpoints. The second is a fallback only;
+        // both are best-effort services and neither is a production SLA.
+        val bases = listOf(
+            "https://router.project-osrm.org/route/v1/driving/",
+            "https://routing.openstreetmap.de/routed-car/route/v1/driving/"
+        )
+        val coordinates = "$startLongitude,$startLatitude;$endLongitude,$endLatitude"
+        for (base in bases) {
+            var connection: HttpURLConnection? = null
+            try {
+                val endpoint = base + coordinates + "?overview=full&geometries=geojson&steps=true"
+                connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 9000
+                    readTimeout = 14000
+                    setRequestProperty("User-Agent", "HamedSmartDelivery/0.4.3 (Android)")
+                    setRequestProperty("Accept", "application/json")
                 }
-            }
-            val steps = buildList {
-                val legs = route.optJSONArray("legs") ?: return@buildList
-                for (legIndex in 0 until legs.length()) {
-                    val leg = legs.optJSONObject(legIndex) ?: continue
-                    val legSteps = leg.optJSONArray("steps") ?: continue
-                    for (stepIndex in 0 until legSteps.length()) {
-                        val step = legSteps.optJSONObject(stepIndex) ?: continue
-                        val maneuver = step.optJSONObject("maneuver")
-                        val type = maneuver?.optString("type").orEmpty()
-                        val modifier = maneuver?.optString("modifier").orEmpty()
-                        val road = step.optString("name").takeIf { it.isNotBlank() }
-                        val instruction = formatInstruction(type, modifier, road)
-                        val coordinate = maneuver?.optJSONArray("location")
-                        val point = if (coordinate != null && coordinate.length() >= 2)
-                            LatLng(coordinate.getDouble(1), coordinate.getDouble(0)) else null
-                        if (instruction.isNotBlank()) add(
-                            RouteStep(instruction, step.optDouble("distance", 0.0), step.optDouble("duration", 0.0), point)
-                        )
+                if (connection.responseCode !in 200..299) continue
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                val root = JSONObject(body)
+                if (root.optString("code") != "Ok") continue
+                val route = root.optJSONArray("routes")?.optJSONObject(0) ?: continue
+                val coordinatesArray = route.getJSONObject("geometry").getJSONArray("coordinates")
+                val points = buildList {
+                    for (index in 0 until coordinatesArray.length()) {
+                        val pair = coordinatesArray.getJSONArray(index)
+                        add(LatLng(pair.getDouble(1), pair.getDouble(0)))
                     }
                 }
+                if (points.size < 2) continue
+                val steps = buildList {
+                    val legs = route.optJSONArray("legs") ?: return@buildList
+                    for (legIndex in 0 until legs.length()) {
+                        val leg = legs.optJSONObject(legIndex) ?: continue
+                        val legSteps = leg.optJSONArray("steps") ?: continue
+                        for (stepIndex in 0 until legSteps.length()) {
+                            val step = legSteps.optJSONObject(stepIndex) ?: continue
+                            val maneuver = step.optJSONObject("maneuver")
+                            val type = maneuver?.optString("type").orEmpty()
+                            val modifier = maneuver?.optString("modifier").orEmpty()
+                            val road = step.optString("name").takeIf { it.isNotBlank() }
+                            val instruction = formatInstruction(type, modifier, road)
+                            val coordinate = maneuver?.optJSONArray("location")
+                            val point = if (coordinate != null && coordinate.length() >= 2)
+                                LatLng(coordinate.getDouble(1), coordinate.getDouble(0)) else null
+                            if (instruction.isNotBlank()) add(
+                                RouteStep(instruction, step.optDouble("distance", 0.0), step.optDouble("duration", 0.0), point)
+                            )
+                        }
+                    }
+                }
+                return RouteResult(
+                    points = points,
+                    distanceMeters = route.optDouble("distance", 0.0),
+                    durationSeconds = route.optDouble("duration", 0.0),
+                    steps = steps
+                )
+            } catch (_: Exception) {
+                // Try the alternate router if this endpoint times out or rejects the route.
+            } finally {
+                connection?.disconnect()
             }
-            if (points.size < 2) null else RouteResult(
-                points = points,
-                distanceMeters = route.optDouble("distance", 0.0),
-                durationSeconds = route.optDouble("duration", 0.0),
-                steps = steps
-            )
-        } catch (_: Exception) {
-            null
-        } finally {
-            connection?.disconnect()
         }
+        return null
     }
 
     private fun formatInstruction(type: String, modifier: String, road: String?): String {
