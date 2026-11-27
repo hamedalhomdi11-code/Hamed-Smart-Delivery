@@ -636,7 +636,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     currentStepIndex = 0
                                     nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
                                     alertRouteChanged(context, soundAlertsEnabled, vibrationAlertsEnabled)
-                                    if (ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
+                                    if (ttsReady && soundAlertsEnabled) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
                                 } else {
                                     routeStatus = "تعذر تحديث المسار حالياً"
