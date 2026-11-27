@@ -596,8 +596,12 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     val latestOrderProducingClusterIds by rememberUpdatedState(orderProducingClusterIds)
     val latestClusterWaitStartedAt by rememberUpdatedState(clusterWaitStartedAt)
     val latestSelectedClusterId by rememberUpdatedState(selectedClusterId)
+    val latestTrackingActive by rememberUpdatedState(trackingActive)
+    val latestSoundAlertsEnabled by rememberUpdatedState(soundAlertsEnabled)
+    val latestVibrationAlertsEnabled by rememberUpdatedState(vibrationAlertsEnabled)
+    val latestPerspective3D by rememberUpdatedState(perspective3D)
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, searchActive) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, gpsMode, searchRequestId, manualSwitchRequestId, searchActive) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission || gpsMode == GpsMode.STOPPED) {
             onDispose { }
@@ -689,7 +693,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     }
                     lastArrowBearing = targetArrowBearing
                     val previousCameraLocation = lastCameraLocation
-                    val shouldFollow = followUserCamera && (firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f)))
+                    val shouldFollow = followUserCamera && (firstFix || (latestTrackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f)))
                     if (shouldFollow) {
                         firstFix = false
                         val bearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing.toDouble() else map.cameraPosition.bearing
@@ -697,7 +701,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             CameraUpdateFactory.newCameraPosition(
                                 CameraPosition.Builder().target(point)
                                     .zoom(16.5)
-                                    .tilt(if (perspective3D) 58.0 else 0.0).bearing(bearing).build()
+                                    .tilt(if (latestPerspective3D) 58.0 else 0.0).bearing(bearing).build()
                             ),
                             850
                         )
@@ -886,7 +890,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             .width(6f)
                                     )
                                     routePoints = updated.points
-                                    alertRouteChanged(context, soundAlertsEnabled, vibrationAlertsEnabled)
+                                    alertRouteChanged(context, latestSoundAlertsEnabled, latestVibrationAlertsEnabled)
                                     onRouteChanged()
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
                                 } else {
@@ -921,6 +925,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 // No location provider is available on this device.
             }
             onDispose {
+                if (routeJob?.isActive == true) routeRequested = false
                 discoveryJob?.cancel()
                 routeJob?.cancel()
                 markerAnimationJob?.cancel()
