@@ -9,7 +9,8 @@ RUN curl -fsSL https://services.gradle.org/distributions/gradle-8.11.1-bin.zip -
 ENV PATH="/opt/gradle-8.11.1/bin:${PATH}"
 COPY . .
 RUN bash scripts/build_riyadh_database.sh
-RUN gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+# Limit concurrent dependency requests to reduce pressure on public artifact repositories.
+RUN gradle --no-daemon --max-workers=2 --build-cache :app:testDebugUnitTest :app:assembleDebug
 RUN mkdir -p /srv && cp app/build/outputs/apk/debug/app-debug.apk /srv/hamed-smart-delivery-0.4.3-debug.apk && cp data/output/riyadh-build-report.json /srv/riyadh-build-report.json
 EXPOSE 10000
 CMD ["python3", "/workspace/scripts/serve_apk.py"]
