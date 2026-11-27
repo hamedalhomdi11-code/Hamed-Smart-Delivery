@@ -66,3 +66,4 @@ Verification status for this recovery patch:
 - APK contents/signature/HTTP download: pending final build.
 - Physical-device GPS start/stop, map route drawing, background behavior and battery checks: still require testing on the user's phone.
 - No merge to the default branch, no change to the Hamed Maps server, and no change to the source Riyadh database schema.
+- Map discovery and route jobs now read changing visit/exclusion and display preferences without tearing down the live location listener; if a route request is canceled during lifecycle cleanup, its pending flag is reset so the next GPS fix can retry.
