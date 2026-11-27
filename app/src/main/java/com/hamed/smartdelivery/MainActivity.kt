@@ -236,6 +236,12 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
         ContextCompat.registerReceiver(context, receiver, IntentFilter(LocationTrackingService.ACTION_TRACKING_STATE), ContextCompat.RECEIVER_NOT_EXPORTED)
+        // The service may have started before this receiver was registered (cold launch).
+        // Reconcile UI state with the service's persisted state immediately after registration.
+        val activeNow = context.getSharedPreferences(LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .getBoolean(LocationTrackingService.KEY_ACTIVE, false)
+        trackingActive = activeNow
+        gpsMode = if (activeNow) GpsMode.TRACKING else GpsMode.STOPPED
         onDispose { context.unregisterReceiver(receiver) }
     }
     var perspective3D by remember { mutableStateOf(workflowPrefs.getBoolean("perspective_3d", true)) }
@@ -848,7 +854,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         "لم يتوفر تجمع صالح بعد • مستمر في البحث عن تجمع آخر"
                                     else "لا توجد تجمعات قريبة في قاعدة الرياض حتى الآن • يجري توسيع نطاق البحث"
                                 } catch (error: Exception) {
-                                    routeStatus = "تعذر مصدر مؤقتاً • مستمر في إعادة المحاولة"
+                                    android.util.Log.e("HamedSmartDelivery", "Riyadh cluster discovery failed at ${searchLocation.latitude},${searchLocation.longitude}", error)
+                                    routeStatus = "تعذر قراءة قاعدة الرياض أو البحث: ${error.localizedMessage ?: error.javaClass.simpleName} • إعادة المحاولة"
                                 }
                                 retry += 1
                                 delay((2000L * (1L shl retry.coerceAtMost(4))).coerceAtMost(30000L))
