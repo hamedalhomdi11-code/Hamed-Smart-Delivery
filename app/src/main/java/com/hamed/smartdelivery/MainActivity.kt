@@ -186,11 +186,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
     }
-    val requestLocationPermissions: () -> Unit = {
-        val requested = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
-        locationPermissionLauncher.launch(requested.toTypedArray())
-    }
+    // Safe build profile: location tracking and live navigation are disabled.
+    val requestLocationPermissions: () -> Unit = { }
     LaunchedEffect(Unit) {
         val database = OrderClusterDatabase(context)
         orderProducingClusterIds = withContext(Dispatchers.IO) {
@@ -209,11 +206,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
     }
-    // Ask for GPS permission on first launch; Android still controls the permission dialog.
-    LaunchedEffect(Unit) {
-        if (!hasLocationPermission) requestLocationPermissions()
-    }
-
+    // Location permission is intentionally not requested in this safe build profile.
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
@@ -367,7 +360,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
-    val navigationActive = gpsMode == GpsMode.NAVIGATION
+    val navigationActive = false
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
