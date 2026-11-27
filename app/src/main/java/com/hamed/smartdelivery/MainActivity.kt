@@ -85,6 +85,56 @@ private val Muted = Color(0xFF8EA5B8)
 private fun clusterStableId(cluster: RestaurantCluster): String = cluster.clusterId?.takeIf { it.isNotBlank() }
     ?: "geo:" + String.format(Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
 
+private fun readPersistedCluster(prefs: android.content.SharedPreferences): RestaurantCluster? {
+    val latitude = prefs.getString("selected_cluster_latitude", null)?.toDoubleOrNull() ?: return null
+    val longitude = prefs.getString("selected_cluster_longitude", null)?.toDoubleOrNull() ?: return null
+    return RestaurantCluster(
+        latitude = latitude,
+        longitude = longitude,
+        restaurantCount = prefs.getInt("selected_cluster_count", 0),
+        names = prefs.getString("selected_cluster_names", "").orEmpty().split("\u001f").filter { it.isNotBlank() },
+        distanceMeters = prefs.getString("selected_cluster_distance", "0")?.toDoubleOrNull() ?: 0.0,
+        searchRadiusMeters = prefs.getInt("selected_cluster_search_radius", 5000),
+        category = prefs.getString("selected_cluster_category", "restaurant").orEmpty(),
+        clusterId = prefs.getString("selected_cluster_id", null),
+        district = prefs.getString("selected_cluster_district", null),
+        clusterRadiusMeters = prefs.getString("selected_cluster_radius", "0")?.toDoubleOrNull() ?: 0.0
+    )
+}
+
+private fun writePersistedCluster(prefs: android.content.SharedPreferences, cluster: RestaurantCluster?) {
+    val editor = prefs.edit()
+    if (cluster == null) {
+        listOf(
+            "selected_cluster_latitude", "selected_cluster_longitude", "selected_cluster_count",
+            "selected_cluster_names", "selected_cluster_distance", "selected_cluster_search_radius",
+            "selected_cluster_category", "selected_cluster_id", "selected_cluster_district", "selected_cluster_radius"
+        ).forEach(editor::remove)
+    } else {
+        editor.putString("selected_cluster_latitude", cluster.latitude.toString())
+            .putString("selected_cluster_longitude", cluster.longitude.toString())
+            .putInt("selected_cluster_count", cluster.restaurantCount)
+            .putString("selected_cluster_names", cluster.names.joinToString("\u001f"))
+            .putString("selected_cluster_distance", cluster.distanceMeters.toString())
+            .putInt("selected_cluster_search_radius", cluster.searchRadiusMeters)
+            .putString("selected_cluster_category", cluster.category)
+            .putString("selected_cluster_id", cluster.clusterId)
+            .putString("selected_cluster_district", cluster.district)
+            .putString("selected_cluster_radius", cluster.clusterRadiusMeters.toString())
+    }
+    editor.apply()
+}
+
+private fun readPersistedExclusions(prefs: android.content.SharedPreferences): Map<String, Long> =
+    prefs.getString("temporary_exclusions", "").orEmpty().split('|').mapNotNull { entry ->
+        val separator = entry.lastIndexOf('=')
+        if (separator <= 0) null else {
+            val id = Uri.decode(entry.substring(0, separator))
+            val until = entry.substring(separator + 1).toLongOrNull()
+            if (id.isBlank() || until == null) null else id to until
+        }
+    }.toMap()
+
 private fun alertRouteChanged(context: Context, soundEnabled: Boolean, vibrationEnabled: Boolean) {
     if (vibrationEnabled) runCatching {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -139,10 +189,17 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
-    var driverSnapshot by remember { mutableStateOf(DriverSnapshot()) }
+    val workflowPrefs = remember { context.getSharedPreferences("workflow_state", Context.MODE_PRIVATE) }
+    val restoredDriverMode = remember {
+        runCatching { DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!) }
+            .getOrDefault(DriverMode.IDLE)
+    }
+    var driverSnapshot by remember {
+        mutableStateOf(DriverSnapshot(restoredDriverMode, workflowPrefs.getString("last_command_id", null)))
+    }
     var trackingActive by remember { mutableStateOf(false) }
     var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
-    var perspective3D by remember { mutableStateOf(true) }
+    var perspective3D by remember { mutableStateOf(false) }
     var english by remember { mutableStateOf(false) }
     val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
     var selected by remember { mutableIntStateOf(uiStatePrefs.getInt("selected_tab", 0).coerceIn(0, 3)) }
@@ -152,15 +209,36 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     LaunchedEffect(selected) {
         uiStatePrefs.edit().putInt("selected_tab", selected).apply()
     }
-    var searchRequestId by remember { mutableIntStateOf(0) }
+    var searchRequestId by remember { mutableIntStateOf(if (restoredDriverMode == DriverMode.SEARCHING) 1 else 0) }
     var manualSwitchRequestId by remember { mutableIntStateOf(0) }
-    var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
-    var excludedClusters by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var selectedCluster by remember { mutableStateOf(readPersistedCluster(workflowPrefs)) }
+    var excludedClusters by remember { mutableStateOf(readPersistedExclusions(workflowPrefs)) }
     val clusterPrefs = remember { context.getSharedPreferences("cluster_visit_history", Context.MODE_PRIVATE) }
     var visitedClusterIds by remember { mutableStateOf(clusterPrefs.getString("visited_ids", "").orEmpty().split('|').filter { it.isNotBlank() }) }
     var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var clusterWaitStartedAt by remember { mutableStateOf<Long?>(null) }
+    var clusterWaitStartedAt by remember {
+        mutableStateOf(workflowPrefs.getLong("cluster_wait_started_at", -1L).takeIf { it > 0L })
+    }
     var waitRemainingSeconds by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(driverSnapshot) {
+        workflowPrefs.edit()
+            .putString("driver_mode", driverSnapshot.mode.name)
+            .putString("last_command_id", driverSnapshot.lastCommandId)
+            .apply()
+    }
+    LaunchedEffect(selectedCluster) { writePersistedCluster(workflowPrefs, selectedCluster) }
+    LaunchedEffect(excludedClusters) {
+        val encoded = excludedClusters.entries.joinToString("|") { "${Uri.encode(it.key)}=${it.value}" }
+        workflowPrefs.edit().putString("temporary_exclusions", encoded).apply()
+    }
+    LaunchedEffect(clusterWaitStartedAt) {
+        if (clusterWaitStartedAt == null) workflowPrefs.edit().remove("cluster_wait_started_at").apply()
+        else workflowPrefs.edit().putLong("cluster_wait_started_at", clusterWaitStartedAt!!).apply()
+    }
+    LaunchedEffect(perspective3D, english) {
+        workflowPrefs.edit().putBoolean("perspective_3d", perspective3D).putBoolean("english", english).apply()
+    }
     val routeAlertPrefs = remember { context.getSharedPreferences("route_alert_preferences", Context.MODE_PRIVATE) }
     var soundAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("sound", true)) }
     var vibrationAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("vibration", true)) }
