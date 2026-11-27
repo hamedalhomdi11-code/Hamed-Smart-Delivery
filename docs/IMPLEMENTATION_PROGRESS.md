@@ -46,3 +46,23 @@ Base implementation: Architecture 1/2 branch PR #10; this integrated branch reta
 2. Verify permission prompts, live geographic marker movement, and foreground service behavior on a physical device.
 3. Verify timer transitions, exclusions, task pause/resume, audio/vibration preferences, and process restoration.
 4. Verify database integrity and APK signature; do not claim production signing unless the original keystore matches.
+
+## Recovery audit and fixes — 2026-11-28
+
+The installed 0.4.3 report identified two regressions: GPS start/stop state was being changed optimistically by the UI, and cluster discovery could remain empty when no cluster center fell within the fixed 5 km radius.
+
+Focused fixes applied on the existing feature branch:
+
+- GPS stop now sends the service's explicit `ACTION_STOP` command. UI state is changed only when the foreground service broadcasts its actual state.
+- The location service removes any previous provider subscriptions before starting a new session and explicitly removes foreground notification state when stopped.
+- Cluster discovery expands through 1, 3, 5, 8, 12 and 15 km. If no eligible cluster exists within 15 km, it tries the nearest real database clusters only while the GPS coordinate is inside the Riyadh database coverage bounds.
+- Discovery callbacks report whether a usable cluster was selected. If nearby clusters are temporarily excluded or blocked by the four-other-clusters repeat rule, the search continues to wider radii rather than treating the first batch as final.
+- The repeat-visit rule no longer falls back to a recently visited cluster merely because it is the first available result. An order-producing cluster remains eligible under the accepted exception.
+- The bundled Riyadh asset version was bumped so an app update replaces an older on-device database copy; import validation now checks for non-empty restaurant/cafe clusters, not just a generic v3 row.
+
+Verification status for this recovery patch:
+
+- Render Docker build and unit tests: pending final deploy result.
+- APK contents/signature/HTTP download: pending final build.
+- Physical-device GPS start/stop, map route drawing, background behavior and battery checks: still require testing on the user's phone.
+- No merge to the default branch, no change to the Hamed Maps server, and no change to the source Riyadh database schema.
