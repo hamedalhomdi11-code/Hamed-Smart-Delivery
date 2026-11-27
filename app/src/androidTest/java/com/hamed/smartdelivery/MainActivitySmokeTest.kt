@@ -34,4 +34,31 @@ class MainActivitySmokeTest {
         assertTrue("Expected active pharmacies in bundled Riyadh database", pharmacies.isNotEmpty())
     }
 
+    @Test
+    fun orderOriginIsPersistedInItsOwnDatabase() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.deleteDatabase("hamed_order_clusters.sqlite")
+        val database = OrderClusterDatabase(context)
+        val cluster = RestaurantCluster(
+            latitude = 24.7136,
+            longitude = 46.6753,
+            restaurantCount = 12,
+            names = listOf("test cluster"),
+            distanceMeters = 250.0,
+            clusterId = "test-cluster"
+        )
+        database.recordOrder(cluster, 1_800_000_000_000L)
+        database.recordOrder(cluster, 1_800_000_001_000L)
+        val count = database.readableDatabase.rawQuery(
+            "SELECT order_count FROM order_cluster_totals WHERE cluster_id = ?",
+            arrayOf("test-cluster")
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            cursor.getInt(0)
+        }
+        assertTrue("Expected both order events to be counted", count == 2)
+        database.close()
+        context.deleteDatabase("hamed_order_clusters.sqlite")
+    }
+
 }

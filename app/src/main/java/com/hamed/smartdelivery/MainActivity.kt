@@ -14,6 +14,12 @@ import android.graphics.Color as AndroidColor
 import android.os.Looper
 import android.os.SystemClock
 import android.os.Build
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.os.VibrationEffect
+import android.os.Handler
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import android.os.Bundle
@@ -68,12 +74,86 @@ import com.hamed.smartdelivery.domain.DriverCommand
 import com.hamed.smartdelivery.domain.DriverMode
 import com.hamed.smartdelivery.domain.DriverReducer
 import com.hamed.smartdelivery.domain.DriverSnapshot
+import com.hamed.smartdelivery.domain.GpsMode
+import com.hamed.smartdelivery.domain.ClusterPolicy
 
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
 private val Mint = Color(0xFF5EF0C2)
 private val Cyan = Color(0xFF53C7F4)
 private val Muted = Color(0xFF8EA5B8)
+
+private fun clusterStableId(cluster: RestaurantCluster): String = cluster.clusterId?.takeIf { it.isNotBlank() }
+    ?: "geo:" + String.format(Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
+
+private fun readPersistedCluster(prefs: android.content.SharedPreferences): RestaurantCluster? {
+    val latitude = prefs.getString("selected_cluster_latitude", null)?.toDoubleOrNull() ?: return null
+    val longitude = prefs.getString("selected_cluster_longitude", null)?.toDoubleOrNull() ?: return null
+    return RestaurantCluster(
+        latitude = latitude,
+        longitude = longitude,
+        restaurantCount = prefs.getInt("selected_cluster_count", 0),
+        names = prefs.getString("selected_cluster_names", "").orEmpty().split("\u001f").filter { it.isNotBlank() },
+        distanceMeters = prefs.getString("selected_cluster_distance", "0")?.toDoubleOrNull() ?: 0.0,
+        searchRadiusMeters = prefs.getInt("selected_cluster_search_radius", 5000),
+        category = prefs.getString("selected_cluster_category", "restaurant").orEmpty(),
+        clusterId = prefs.getString("selected_cluster_id", null),
+        district = prefs.getString("selected_cluster_district", null),
+        clusterRadiusMeters = prefs.getString("selected_cluster_radius", "0")?.toDoubleOrNull() ?: 0.0
+    )
+}
+
+private fun writePersistedCluster(prefs: android.content.SharedPreferences, cluster: RestaurantCluster?) {
+    val editor = prefs.edit()
+    if (cluster == null) {
+        listOf(
+            "selected_cluster_latitude", "selected_cluster_longitude", "selected_cluster_count",
+            "selected_cluster_names", "selected_cluster_distance", "selected_cluster_search_radius",
+            "selected_cluster_category", "selected_cluster_id", "selected_cluster_district", "selected_cluster_radius"
+        ).forEach { editor.remove(it) }
+    } else {
+        editor.putString("selected_cluster_latitude", cluster.latitude.toString())
+            .putString("selected_cluster_longitude", cluster.longitude.toString())
+            .putInt("selected_cluster_count", cluster.restaurantCount)
+            .putString("selected_cluster_names", cluster.names.joinToString("\u001f"))
+            .putString("selected_cluster_distance", cluster.distanceMeters.toString())
+            .putInt("selected_cluster_search_radius", cluster.searchRadiusMeters)
+            .putString("selected_cluster_category", cluster.category)
+            .putString("selected_cluster_id", cluster.clusterId)
+            .putString("selected_cluster_district", cluster.district)
+            .putString("selected_cluster_radius", cluster.clusterRadiusMeters.toString())
+    }
+    editor.apply()
+}
+
+private fun readPersistedExclusions(prefs: android.content.SharedPreferences): Map<String, Long> =
+    prefs.getString("temporary_exclusions", "").orEmpty().split('|').mapNotNull { entry ->
+        val separator = entry.lastIndexOf('=')
+        if (separator <= 0) null else {
+            val id = Uri.decode(entry.substring(0, separator))
+            val until = entry.substring(separator + 1).toLongOrNull()
+            if (id.isBlank() || until == null) null else id to until
+        }
+    }.toMap()
+
+private fun alertRouteChanged(context: Context, soundEnabled: Boolean, vibrationEnabled: Boolean) {
+    if (vibrationEnabled) runCatching {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(VibratorManager::class.java).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        if (vibrator.hasVibrator()) {
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 220, 100, 220), -1))
+        }
+    }
+    if (soundEnabled) runCatching {
+        val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90)
+        tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 850)
+        Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, 1000L)
+    }
+}
 
 class MainActivity : ComponentActivity() {
     private var sharedDestination by mutableStateOf<DeliveryDestination?>(null)
@@ -110,13 +190,121 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
-    var driverSnapshot by remember { mutableStateOf(DriverSnapshot()) }
+    val workflowPrefs = remember { context.getSharedPreferences("workflow_state", Context.MODE_PRIVATE) }
+    var announcementsEnabled by remember { mutableStateOf(workflowPrefs.getBoolean("announcements_enabled", true)) }
+    var announcementVolume by remember { mutableFloatStateOf(workflowPrefs.getFloat("announcement_volume", 0.85f).coerceIn(0f, 1f)) }
+    var speechReady by remember { mutableStateOf(false) }
+    val announcementsSpeech = remember(context) { TextToSpeech(context) { status -> speechReady = status == TextToSpeech.SUCCESS } }
+    LaunchedEffect(speechReady) { if (speechReady) announcementsSpeech.language = Locale("ar", "SA") }
+    DisposableEffect(announcementsSpeech) { onDispose { announcementsSpeech.stop(); announcementsSpeech.shutdown() } }
+    fun announceArabic(message: String) {
+        if (announcementsEnabled && speechReady && message.isNotBlank()) {
+            announcementsSpeech.setSpeechRate(1.0f)
+            announcementsSpeech.speak(message, TextToSpeech.QUEUE_FLUSH,
+                android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, announcementVolume) },
+                "hamed-event")
+        }
+    }
+    val restoredDriverMode = remember {
+        val savedMode = runCatching {
+            DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!)
+        }.getOrDefault(DriverMode.IDLE)
+        // A previously active search cannot be resumed without a verified location session.
+        if (savedMode == DriverMode.SEARCHING) DriverMode.IDLE else savedMode
+    }
+    var driverSnapshot by remember {
+        mutableStateOf(DriverSnapshot(restoredDriverMode, workflowPrefs.getString("last_command_id", null)))
+    }
     var trackingActive by remember { mutableStateOf(false) }
-    var perspective3D by remember { mutableStateOf(true) }
-    var english by remember { mutableStateOf(false) }
-    var selected by remember { mutableIntStateOf(0) }
+    var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
+    var perspective3D by remember { mutableStateOf(workflowPrefs.getBoolean("perspective_3d", true)) }
+    var english by remember { mutableStateOf(workflowPrefs.getBoolean("english", false))}
+    val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
+    var selected by remember { mutableIntStateOf(uiStatePrefs.getInt("selected_tab", 0).coerceIn(0, 3)) }
     var mapExpanded by remember { mutableStateOf(false) }
-    var searchRequestId by remember { mutableIntStateOf(0) }
+
+    // Keep the last top-level page across process restarts without persisting live location data.
+    LaunchedEffect(selected) {
+        uiStatePrefs.edit().putInt("selected_tab", selected).apply()
+    }
+    var searchRequestId by remember { mutableIntStateOf(if (restoredDriverMode == DriverMode.SEARCHING) 1 else 0) }
+    var manualSwitchRequestId by remember { mutableIntStateOf(0) }
+    var selectedCluster by remember { mutableStateOf(readPersistedCluster(workflowPrefs)) }
+    var excludedClusters by remember { mutableStateOf(readPersistedExclusions(workflowPrefs)) }
+    val clusterPrefs = remember { context.getSharedPreferences("cluster_visit_history", Context.MODE_PRIVATE) }
+    var visitedClusterIds by remember { mutableStateOf(clusterPrefs.getString("visited_ids", "").orEmpty().split('|').filter { it.isNotBlank() }) }
+    var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var clusterWaitStartedAt by remember {
+        mutableStateOf(
+            if (restoredDriverMode == DriverMode.SEARCHING)
+                workflowPrefs.getLong("cluster_wait_started_at", -1L).takeIf { it > 0L }
+            else null
+        )
+    }
+    var waitRemainingSeconds by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(driverSnapshot) {
+        workflowPrefs.edit().putString("driver_mode", driverSnapshot.mode.name)
+            .putString("last_command_id", driverSnapshot.lastCommandId).apply()
+    }
+    var previousDriverMode by remember { mutableStateOf(driverSnapshot.mode) }
+    LaunchedEffect(driverSnapshot.mode) {
+        if (driverSnapshot.mode != previousDriverMode) {
+            when (driverSnapshot.mode) {
+                DriverMode.SEARCHING -> announceArabic("بدأ البحث عن الطلبات")
+                DriverMode.ORDER_RECEIVED -> announceArabic("تم استلام الطلب. توقف البحث مؤقتاً")
+                DriverMode.IDLE -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("اكتملت المهمة. يمكنك بدء البحث عن طلب جديد")
+                DriverMode.SAFE_MODE -> announceArabic("تم تفعيل وضع الأمان")
+            }
+            previousDriverMode = driverSnapshot.mode
+        }
+    }
+    var previousSearchRequestId by remember { mutableIntStateOf(searchRequestId) }
+    var previousSearchMode by remember { mutableStateOf(driverSnapshot.mode) }
+    LaunchedEffect(searchRequestId, driverSnapshot.mode) {
+        if (searchRequestId > previousSearchRequestId &&
+            driverSnapshot.mode == DriverMode.SEARCHING && previousSearchMode == DriverMode.SEARCHING) {
+            announceArabic("تم تغيير التجمع. يجري البحث عن التجمع التالي")
+        }
+        previousSearchRequestId = searchRequestId
+        previousSearchMode = driverSnapshot.mode
+    }
+    LaunchedEffect(clusterWaitStartedAt) {
+        if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
+            announceArabic("بدأ مؤقت انتظار التجمع لمدة خمس دقائق")
+    }
+    LaunchedEffect(selectedCluster) { writePersistedCluster(workflowPrefs, selectedCluster) }
+    LaunchedEffect(excludedClusters) {
+        val encoded = excludedClusters.entries.joinToString("|") { "${Uri.encode(it.key)}=${it.value}" }
+        workflowPrefs.edit().putString("temporary_exclusions", encoded).apply()
+    }
+    LaunchedEffect(clusterWaitStartedAt) {
+        if (clusterWaitStartedAt == null) workflowPrefs.edit().remove("cluster_wait_started_at").apply()
+        else workflowPrefs.edit().putLong("cluster_wait_started_at", clusterWaitStartedAt!!).apply()
+    }
+    LaunchedEffect(perspective3D, english) {
+        workflowPrefs.edit().putBoolean("perspective_3d", perspective3D).putBoolean("english", english).apply()
+    }
+    val routeAlertPrefs = remember { context.getSharedPreferences("route_alert_preferences", Context.MODE_PRIVATE) }
+    var soundAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("sound", true)) }
+    var vibrationAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("vibration", true)) }
+    var welcomeAnnounced by remember { mutableStateOf(false) }
+    LaunchedEffect(speechReady, announcementsEnabled) {
+        if (speechReady && announcementsEnabled && !welcomeAnnounced) {
+            announceArabic("مرحباً بك في حامد سمارت دليفري")
+            welcomeAnnounced = true
+        }
+    }
+    var timerEndAnnouncedAt by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(waitRemainingSeconds, clusterWaitStartedAt, driverSnapshot.mode) {
+        val startedAt = clusterWaitStartedAt
+        if (startedAt != null && driverSnapshot.mode == DriverMode.SEARCHING &&
+            waitRemainingSeconds == 0 && System.currentTimeMillis() >= startedAt + 5 * 60 * 1000L &&
+            timerEndAnnouncedAt != startedAt) {
+            announceArabic("انتهى مؤقت التجمع. يجري الانتقال للبحث عن تجمع آخر")
+            timerEndAnnouncedAt = startedAt
+        }
+    }
     var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -132,32 +320,48 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
             trackingActive = true
+            gpsMode = GpsMode.TRACKING
             if (pendingSearchAfterPermission) {
                 searchRequestId += 1
                 pendingSearchAfterPermission = false
             }
         }
     }
-    val requestLocationPermissions: () -> Unit = {
-        val requested = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 33) requested.add(Manifest.permission.POST_NOTIFICATIONS)
-        locationPermissionLauncher.launch(requested.toTypedArray())
-    }
-    // Ask for GPS permission on first launch; Android still controls the permission dialog.
+    // Safe build profile: location tracking and live navigation are disabled.
+    val requestLocationPermissions: () -> Unit = { }
     LaunchedEffect(Unit) {
-        if (!hasLocationPermission) requestLocationPermissions()
+        val database = OrderClusterDatabase(context)
+        orderProducingClusterIds = withContext(Dispatchers.IO) {
+            try { database.orderProducingClusterIds() } finally { database.close() }
+        }
     }
-
+    LaunchedEffect(clusterWaitStartedAt, driverSnapshot.mode) {
+        val startedAt = clusterWaitStartedAt
+        if (startedAt == null || driverSnapshot.mode != DriverMode.SEARCHING) {
+            waitRemainingSeconds = 0
+        } else {
+            while (driverSnapshot.mode == DriverMode.SEARCHING && clusterWaitStartedAt == startedAt) {
+                waitRemainingSeconds = ((startedAt + 5 * 60 * 1000L - System.currentTimeMillis()) / 1000L)
+                    .coerceAtLeast(0L).toInt()
+                delay(1000L)
+            }
+        }
+    }
+    // Location permission is intentionally not requested in this safe build profile.
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
             requestLocationPermissions()
-        } else if (trackingActive) {
-            context.stopService(Intent(context, LocationTrackingService::class.java))
-            trackingActive = false
         } else {
-            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            trackingActive = true
+            if (gpsMode == GpsMode.STOPPED) {
+                ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                gpsMode = GpsMode.TRACKING
+                trackingActive = true
+            } else {
+                context.stopService(Intent(context, LocationTrackingService::class.java))
+                gpsMode = GpsMode.STOPPED
+                trackingActive = false
+            }
         }
     }
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
@@ -166,7 +370,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -182,28 +386,56 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    if (!mapExpanded) Dashboard(driverSnapshot, english) { command ->
-                        if (command == DriverCommand.StartSearch) {
-                            if (!hasLocationPermission) {
-                                pendingSearchAfterPermission = true
-                                requestLocationPermissions()
-                            } else searchRequestId += 1
+                    if (!mapExpanded) Dashboard(driverSnapshot, english, waitRemainingSeconds, onManualSwitch = { selectedCluster?.let { cluster ->
+                        val now = System.currentTimeMillis()
+                        val exclusion = com.hamed.smartdelivery.domain.ClusterPolicy.manualSwitch(clusterStableId(cluster), now)
+                        excludedClusters = excludedClusters + (exclusion.clusterId to exclusion.untilEpochMillis)
+                        selectedCluster = null
+                        clusterWaitStartedAt = null
+                        manualSwitchRequestId += 1
+                        searchRequestId += 1
+                    } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
+                        if (command == DriverCommand.StartSearch && !hasLocationPermission) {
+                            pendingSearchAfterPermission = true
+                            requestLocationPermissions()
+                        } else if (command == DriverCommand.StartSearch && gpsMode == GpsMode.STOPPED) {
+                            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                            gpsMode = GpsMode.TRACKING
+                            trackingActive = true
                         }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
-                        if (transition.accepted) driverSnapshot = transition.snapshot
+                        if (transition.accepted) {
+                            when (command) {
+                                DriverCommand.OrderReceived -> {
+                                    clusterWaitStartedAt = null
+                                    selectedCluster?.let { cluster ->
+                                        runCatching { OrderClusterDatabase(context).recordOrder(cluster) }
+                                        orderProducingClusterIds = orderProducingClusterIds + clusterStableId(cluster)
+                                    }
+                                }
+                                DriverCommand.CompleteDelivery -> {
+                                    clusterWaitStartedAt = null
+                                    // A fresh request ID restarts discovery after the delivery pause.
+                                    searchRequestId += 1
+                                }
+                                else -> Unit
+                            }
+                            driverSnapshot = transition.snapshot
+                            if (command == DriverCommand.StartSearch && hasLocationPermission) searchRequestId += 1
+                        }
                     }
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp)) {
                         when (selected) {
                             1 -> OrdersScreen(driverSnapshot, english)
                             2 -> PlacesScreen(english)
-                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking)
+                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() }, announcementsEnabled, { enabled -> announcementsEnabled = enabled; workflowPrefs.edit().putBoolean("announcements_enabled", enabled).apply() }, announcementVolume, { value -> announcementVolume = value.coerceIn(0f, 1f); workflowPrefs.edit().putFloat("announcement_volume", announcementVolume).apply() }, { announceArabic("هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري") })
                         }
                     }
                 }
                 if (!mapExpanded) NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
-                    val labels = if (english) listOf("Drive", "Orders", "Places", "Profile") else listOf("الملاحة", "الطلبات", "التجمعات", "حسابي")
-                    val icons = listOf(Icons.Rounded.Navigation, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
+                    val labels = if (english) listOf("Home", "Orders", "Places", "Profile") else listOf("الرئيسية", "الطلبات", "التجمعات", "حسابي")
+                    val icons = listOf(Icons.Rounded.Home, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
                     labels.forEachIndexed { i, label ->
                         NavigationBarItem(selected = selected == i, onClick = { selected = i }, icon = { Icon(icons[i], null) },
                             label = { Text(label, fontSize = 10.sp) },
@@ -261,7 +493,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, searchActive: Boolean, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -270,7 +502,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
-    var navigationActive by remember { mutableStateOf(false) }
+    val navigationActive = false
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
@@ -280,6 +512,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
     var showMapProviderDialog by remember { mutableStateOf(false) }
     var mapProviderNotice by remember { mutableStateOf("") }
+    var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
+    var clusterEnteredAt by remember { mutableStateOf<Long?>(null) }
+    var autoSwitchTriggered by remember { mutableStateOf(false) }
     var ttsReady by remember { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
     LaunchedEffect(ttsReady) {
@@ -287,6 +522,13 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     }
     DisposableEffect(speech) {
         onDispose { speech.stop(); speech.shutdown() }
+    }
+    LaunchedEffect(manualSwitchRequestId) {
+        if (manualSwitchRequestId > 0) {
+            currentCluster = null
+            clusterEnteredAt = null
+            autoSwitchTriggered = false
+        }
     }
     val scope = rememberCoroutineScope()
     val mapView = remember {
@@ -339,9 +581,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, perspective3D, searchRequestId, searchActive) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, searchActive, excludedClusters, visitedClusterIds, orderProducingClusterIds) {
         val map = mapLibreMap
-        if (map == null || !styleReady || !hasLocationPermission) {
+        if (map == null || !styleReady || !hasLocationPermission || gpsMode == GpsMode.STOPPED) {
             onDispose { }
         } else {
             val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
@@ -356,29 +598,32 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
-                    if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
-                    val existing = userMarker
-                    if (existing == null) {
-                        userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
-                    } else {
-                        // Interpolate between GPS fixes so the position marker glides instead of jumping.
-                        markerAnimationJob?.cancel()
-                        val start = existing.position
-                        val startedAt = SystemClock.uptimeMillis()
-                        val durationMs = 700L
-                        markerAnimationJob = scope.launch {
-                            while (isActive) {
-                                val fraction = ((SystemClock.uptimeMillis() - startedAt).toFloat() / durationMs).coerceIn(0f, 1f)
-                                val eased = fraction * fraction * (3f - 2f * fraction)
-                                existing.position = LatLng(
-                                    start.latitude + (point.latitude - start.latitude) * eased,
-                                    start.longitude + (point.longitude - start.longitude) * eased
-                                )
-                                if (fraction >= 1f) break
-                                delay(16L)
+                    val clusterAtLocation = currentCluster
+                    if (searchActive && clusterAtLocation != null && !autoSwitchTriggered) {
+                        val clusterDistance = FloatArray(1)
+                        Location.distanceBetween(
+                            location.latitude, location.longitude,
+                            clusterAtLocation.latitude, clusterAtLocation.longitude,
+                            clusterDistance
+                        )
+                        val radius = clusterAtLocation.clusterRadiusMeters.takeIf { it > 0.0 } ?: 150.0
+                        val now = System.currentTimeMillis()
+                        if (clusterDistance[0].toDouble() <= radius) {
+                            if (clusterEnteredAt == null) {
+                                clusterEnteredAt = now
+                                onClusterEntered(clusterStableId(clusterAtLocation))
+                            }
+                            val enteredAt = clusterEnteredAt
+                            if (enteredAt != null && now - enteredAt >= 5 * 60 * 1000L) {
+                                autoSwitchTriggered = true
+                                onAutoExclude(clusterStableId(clusterAtLocation), ClusterPolicy.automaticTimeout(clusterStableId(clusterAtLocation), now).untilEpochMillis)
                             }
                         }
                     }
+                    if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
+                    // The driver symbol is rendered as a single centered overlay (car in tracking,
+                    // direction arrow in navigation), so the map never shows a pin and arrow together.
+                    userMarker?.let { map.removeMarker(it); userMarker = null }
                     val previousCameraLocation = lastCameraLocation
                     val navigating = navigationActive && activeDestination != null
                     val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
@@ -399,7 +644,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         lastProcessedSearch = searchRequestId
                         val requestId = searchRequestId
                         routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
-                        navigationActive = false
                         routeJob?.cancel()
                         displayedRoutePolyline?.let { map.removePolyline(it) }
                         displayedRoutePolyline = null
@@ -435,7 +679,25 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                 existingClusterMarker.title = "تجمع مطاعم • ${cluster.restaurantCount}"
                                             }
                                         }
-                                        val best = updatedClusters.firstOrNull() ?: return@findNearestClustersStreaming
+                                        val now = System.currentTimeMillis()
+                                        val best = updatedClusters.firstOrNull { cluster ->
+                                            val id = clusterStableId(cluster)
+                                            val excludedUntil = excludedClusters[id]
+                                            val isExcluded = excludedUntil != null && excludedUntil > now
+                                            val lastVisit = visitedClusterIds.indexOfLast { it == id }
+                                            val otherVisits = if (lastVisit < 0) 4 else visitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
+                                            val repeatAllowed = lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
+                                            !isExcluded && repeatAllowed
+                                        } ?: run {
+                                            routeStatus = "جميع التجمعات القريبة مستبعدة مؤقتاً أو لم يحن وقت تكرارها"
+                                            return@findNearestClustersStreaming
+                                        }
+                                        if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
+                                            currentCluster = best
+                                            clusterEnteredAt = null
+                                            autoSwitchTriggered = false
+                                        }
+                                        onClusterSelected(best)
                                         val nextDestination = DeliveryDestination(best.latitude, best.longitude)
                                         val previousDestination = activeDestination
                                         val destinationChanged = if (previousDestination == null) true else {
@@ -594,7 +856,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     routeSteps = updated.steps
                                     currentStepIndex = 0
                                     nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                    if (navigationActive && ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
+                                    alertRouteChanged(context, soundAlertsEnabled, vibrationAlertsEnabled)
+                                    if (ttsReady && soundAlertsEnabled) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
                                 } else {
                                     routeStatus = "تعذر تحديث المسار حالياً"
@@ -634,14 +897,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
-        if (navigationActive && activeDestination != null) {
+        if (gpsMode == GpsMode.TRACKING) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).offset(y = 100.dp).size(36.dp),
-                color = Panel.copy(alpha = .94f),
+                modifier = Modifier.align(Alignment.Center).size(42.dp),
+                color = Panel.copy(alpha = .96f),
                 shape = CircleShape
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(24.dp).rotate(currentBearing))
+                    Icon(
+                        Icons.Rounded.Navigation,
+                        null,
+                        tint = Mint,
+                        modifier = Modifier.size(26.dp).rotate(currentBearing)
+                    )
                 }
             }
         }
@@ -659,45 +927,14 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             }
         }
         if (activeDestination != null && routePoints.size > 1) {
-            Row(
+            OutlinedButton(
+                onClick = { showMapProviderDialog = true },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 54.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
             ) {
-                Button(
-                    onClick = {
-                        navigationActive = true
-                        val instruction = nextTurnInstruction.ifBlank { "ابدأ السير إلى الوجهة" }
-                        if (ttsReady) speech.speak(instruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-navigation-start")
-                        routeStatus = "الملاحة داخل التطبيق تعمل"
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Night)
-                ) {
-                    Icon(Icons.Rounded.Navigation, null)
-                    Spacer(Modifier.width(5.dp))
-                    Text(if (navigationActive) "الملاحة تعمل" else "ابدأ الملاحة")
-                }
-                if (navigationActive) {
-                    OutlinedButton(
-                        onClick = {
-                            navigationActive = false
-                            speech.stop()
-                            routeStatus = "تم إيقاف الملاحة • المسار ما زال ظاهراً"
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Rounded.Stop, null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("إيقاف الملاحة")
-                    }
-                }
-                OutlinedButton(
-                    onClick = { showMapProviderDialog = true },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                ) {
-                    Icon(Icons.Rounded.Map, null)
-                    Spacer(Modifier.width(5.dp))
-                    Text("تبديل تطبيق الخريطة")
-                }
+                Icon(Icons.Rounded.Map, null)
+                Spacer(Modifier.width(5.dp))
+                Text("تبديل تطبيق الخريطة")
             }
         }
         if (showMapProviderDialog && activeDestination != null) {
@@ -760,80 +997,69 @@ private fun MapAction(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 }
 
 @Composable
-private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (DriverCommand) -> Unit) {
+private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingSeconds: Int, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
     val mode = snapshot.mode
     val title = when (mode) {
-        DriverMode.IDLE -> if (english) "Ready when you are" else "جاهز للانطلاق"
+        DriverMode.IDLE -> if (english) "Ready" else "جاهز للبحث"
         DriverMode.SEARCHING -> if (english) "Searching for orders" else "البحث عن الطلبات"
-        DriverMode.ORDER_RECEIVED -> if (english) "Order received" else "تم استلام الطلب"
-        DriverMode.TO_RESTAURANT -> if (english) "Heading to restaurant" else "في الطريق إلى المطعم"
-        DriverMode.PICKUP -> if (english) "Order picked up" else "تم استلام الطلب من المطعم"
-        DriverMode.TO_CUSTOMER -> if (english) "Heading to customer" else "في الطريق إلى العميل"
-        DriverMode.COMPLETED -> if (english) "Delivery completed" else "اكتمل التوصيل"
+        DriverMode.ORDER_RECEIVED -> if (english) "Order received — delivery in progress" else "وصلني طلب من هذا التجمع — أكمل التوصيل"
         DriverMode.SAFE_MODE -> if (english) "Safe mode" else "وضع الأمان"
     }
-    Column(Modifier.fillMaxWidth().background(Color(0xFF0B1723)).padding(horizontal = 17.dp, vertical = 15.dp)) {
+    Column(Modifier.fillMaxWidth().background(Color(0xFF0B1723)).padding(horizontal = 14.dp, vertical = 9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(if (english) "DRIVER CONTROL" else "مركز تحكم المندوب", color = Muted, fontSize = 9.sp, letterSpacing = 1.4.sp)
-                Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(if (english) "DRIVER CONTROL" else "مركز تحكم المندوب", color = Muted, fontSize = 9.sp, letterSpacing = 1.2.sp)
+                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
             Surface(color = if (mode == DriverMode.SEARCHING) Mint.copy(alpha = .13f) else Panel, shape = CircleShape) {
-                Text(mode.name.replace('_', ' '), color = if (mode == DriverMode.SEARCHING) Mint else Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp))
+                Text(mode.name.replace('_', ' '), color = if (mode == DriverMode.SEARCHING) Mint else Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp))
             }
         }
-        Spacer(Modifier.height(13.dp))
+        Spacer(Modifier.height(8.dp))
         AnimatedContent(targetState = mode, label = "driver-mode") { currentMode ->
-            val currentCommand = when (currentMode) {
-                DriverMode.IDLE, DriverMode.COMPLETED -> DriverCommand.StartSearch
+            val command = when (currentMode) {
+                DriverMode.IDLE -> DriverCommand.StartSearch
                 DriverMode.SEARCHING -> DriverCommand.OrderReceived
-                DriverMode.ORDER_RECEIVED -> DriverCommand.NavigateToRestaurant
-                DriverMode.TO_RESTAURANT -> DriverCommand.ConfirmPickup
-                DriverMode.PICKUP -> DriverCommand.NavigateToCustomer
-                DriverMode.TO_CUSTOMER -> DriverCommand.CompleteDelivery
+                DriverMode.ORDER_RECEIVED -> DriverCommand.CompleteDelivery
                 DriverMode.SAFE_MODE -> DriverCommand.ExitSafeMode
             }
-            val currentLabel = when (currentMode) {
-                DriverMode.IDLE, DriverMode.COMPLETED -> if (english) "FIND ORDERS" else "ابدأ البحث عن الطلبات"
-                DriverMode.SEARCHING -> if (english) "I GOT AN ORDER" else "وصلني طلب"
-                DriverMode.ORDER_RECEIVED -> if (english) "NAVIGATE TO RESTAURANT" else "توجه إلى المطعم"
-                DriverMode.TO_RESTAURANT -> if (english) "CONFIRM PICKUP" else "تأكيد استلام الطلب"
-                DriverMode.PICKUP -> if (english) "START CUSTOMER TRIP" else "انطلق إلى العميل"
-                DriverMode.TO_CUSTOMER -> if (english) "COMPLETE DELIVERY" else "تأكيد التسليم"
+            val label = when (currentMode) {
+                DriverMode.IDLE -> if (english) "FIND ORDERS" else "البحث عن الطلبات"
+                DriverMode.SEARCHING -> if (english) "I GOT AN ORDER FROM THIS CLUSTER" else "وصلني طلب من هذا التجمع"
+                DriverMode.ORDER_RECEIVED -> if (english) "DELIVERY TASK COMPLETED" else "تم اكتمال المهمة بالطلب"
                 DriverMode.SAFE_MODE -> if (english) "RESUME" else "استئناف العمل"
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { onCommand(currentCommand) }, modifier = Modifier.fillMaxWidth().height(57.dp), shape = RoundedCornerShape(18.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = if (currentMode == DriverMode.SEARCHING) Color(0xFFFFC66D) else Mint, contentColor = Night)) {
-                    Icon(
-                        when (currentMode) {
-                            DriverMode.IDLE, DriverMode.COMPLETED -> Icons.Rounded.Radar
-                            DriverMode.SEARCHING -> Icons.Rounded.LocalShipping
-                            DriverMode.TO_CUSTOMER, DriverMode.TO_RESTAURANT -> Icons.Rounded.Navigation
-                            DriverMode.SAFE_MODE -> Icons.Rounded.PlayArrow
-                            else -> Icons.Rounded.CheckCircle
-                        },
-                        null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(currentLabel, fontWeight = FontWeight.Black, fontSize = 14.sp, letterSpacing = .2.sp)
-                }
-                if (currentMode == DriverMode.SEARCHING) {
-                    OutlinedButton(onClick = { onCommand(DriverCommand.StopSearch) }, modifier = Modifier.fillMaxWidth().height(42.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Muted), shape = RoundedCornerShape(14.dp)) {
-                        Text(if (english) "STOP SEARCH" else "إيقاف البحث")
-                    }
-                }
+            Button(onClick = { onCommand(command) }, modifier = Modifier.fillMaxWidth().height(49.dp), shape = RoundedCornerShape(15.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = if (currentMode == DriverMode.SEARCHING) Color(0xFFFFC66D) else Mint, contentColor = Night)) {
+                Icon(when (currentMode) {
+                    DriverMode.IDLE -> Icons.Rounded.Radar
+                    DriverMode.SEARCHING -> Icons.Rounded.LocalShipping
+                    DriverMode.ORDER_RECEIVED -> Icons.Rounded.CheckCircle
+                    DriverMode.SAFE_MODE -> Icons.Rounded.PlayArrow
+                }, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(label, fontWeight = FontWeight.Black, fontSize = 13.sp)
             }
         }
-        Spacer(Modifier.height(11.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(if (english) listOf("Fuel smart", "Restaurant AI", "Safe drive") else listOf("وقود بذكاء", "ذكاء المطاعم", "قيادة آمنة")) { label ->
-                Surface(color = Panel, shape = CircleShape) {
-                    Text("✦  $label", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp))
+        if (mode == DriverMode.SEARCHING) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onManualSwitch, modifier = Modifier.weight(1f).height(37.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
+                    Text(if (english) "SWITCH CLUSTER" else "تبديل التجمع", fontSize = 10.sp)
+                }
+                OutlinedButton(onClick = onResetExclusions, modifier = Modifier.weight(1f).height(37.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Mint)) {
+                    Text(if (english) "RESET EXCLUSIONS" else "إعادة تهيئة التجمعات", fontSize = 10.sp)
                 }
             }
+            if (waitRemainingSeconds > 0) {
+                val timerText = String.format(Locale.US, "%02d:%02d", waitRemainingSeconds / 60, waitRemainingSeconds % 60)
+                Text(if (english) "Cluster wait: $timerText" else "وقت انتظار التجمع: $timerText", color = Color(0xFFFFC66D), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(if (english) "The app keeps searching between suitable clusters automatically." else "يستمر التطبيق في البحث والتنقل بين التجمعات تلقائياً.", color = Muted, fontSize = 10.sp)
         }
     }
 }
@@ -841,13 +1067,9 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (Dr
 @Composable
 private fun OrdersScreen(snapshot: DriverSnapshot, english: Boolean) {
     val current = when (snapshot.mode) {
-        DriverMode.IDLE -> if (english) "No active delivery" else "لا يوجد توصيل نشط"
-        DriverMode.SEARCHING -> if (english) "Searching for an order" else "البحث عن طلب"
-        DriverMode.ORDER_RECEIVED -> if (english) "Order received" else "تم استلام طلب"
-        DriverMode.TO_RESTAURANT -> if (english) "On the way to restaurant" else "في الطريق إلى المطعم"
-        DriverMode.PICKUP -> if (english) "Picked up from restaurant" else "تم الاستلام من المطعم"
-        DriverMode.TO_CUSTOMER -> if (english) "On the way to customer" else "في الطريق إلى العميل"
-        DriverMode.COMPLETED -> if (english) "Last delivery completed" else "اكتمل آخر توصيل"
+        DriverMode.IDLE -> if (english) "No active delivery" else "لا يوجد طلب نشط"
+        DriverMode.SEARCHING -> if (english) "Searching for orders" else "البحث عن الطلبات يعمل"
+        DriverMode.ORDER_RECEIVED -> if (english) "Delivery in progress" else "تم تسجيل وصول الطلب — البحث متوقف حتى إكمال التوصيل"
         DriverMode.SAFE_MODE -> if (english) "Safe mode is active" else "وضع الأمان مفعّل"
     }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -855,26 +1077,12 @@ private fun OrdersScreen(snapshot: DriverSnapshot, english: Boolean) {
         Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(if (english) "CURRENT DRIVER STATE" else "حالة المندوب الحالية", color = Muted, fontSize = 10.sp)
-                Text(current, color = Mint, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(if (english) "This state is controlled locally. No private HungerStation account data is read." else "هذه الحالة تُدار محلياً، ولا تتم قراءة بيانات حساب هنقرستيشن الخاصة.", color = Muted, fontSize = 12.sp)
-            }
-        }
-        Text(if (english) "Delivery stages" else "مراحل التوصيل", color = Color.White, fontWeight = FontWeight.SemiBold)
-        listOf(
-            DriverMode.ORDER_RECEIVED to if (english) "Order received" else "استلام الطلب",
-            DriverMode.TO_RESTAURANT to if (english) "Go to restaurant" else "التوجه للمطعم",
-            DriverMode.PICKUP to if (english) "Confirm pickup" else "تأكيد الاستلام",
-            DriverMode.TO_CUSTOMER to if (english) "Go to customer" else "التوجه للعميل",
-            DriverMode.COMPLETED to if (english) "Complete delivery" else "إتمام التوصيل"
-        ).forEach { (stage, label) ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(if (snapshot.mode == stage) Icons.Rounded.CheckCircle else Icons.Rounded.Circle, null, tint = if (snapshot.mode == stage) Mint else Muted, modifier = Modifier.size(17.dp))
-                Text(label, color = if (snapshot.mode == stage) Color.White else Muted, fontSize = 13.sp)
+                Text(current, color = Mint, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(if (english) "The order workflow uses the three agreed actions only." else "دورة الطلب تعتمد الأزرار الثلاثة المتفق عليها فقط، دون مراحل المطعم والعميل القديمة.", color = Muted, fontSize = 12.sp)
             }
         }
     }
 }
-
 @Composable
 private fun PlacesScreen(english: Boolean) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -894,7 +1102,7 @@ private fun PlacesScreen(english: Boolean) {
 }
 
 @Composable
-private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit) {
+private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit, announcementsEnabled: Boolean, onAnnouncementsChange: (Boolean) -> Unit, announcementVolume: Float, onAnnouncementVolumeChange: (Float) -> Unit, onTestAnnouncement: () -> Unit) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(if (english) "PROFILE & SETTINGS" else "حسابي والإعدادات", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleLanguage() }) {
@@ -916,7 +1124,43 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.4.0", color = Muted, fontSize = 10.sp)
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (english) "Route change sound" else "صوت تغيير المسار", color = Color.White)
+                    Text(if (english) "Audible warning when route changes" else "تنبيه صوتي عند إعادة حساب المسار", color = Muted, fontSize = 11.sp)
+                }
+                Switch(checked = soundAlertsEnabled, onCheckedChange = onSoundChange)
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (english) "Route change vibration" else "اهتزاز تغيير المسار", color = Color.White)
+                    Text(if (english) "Vibration warning when route changes" else "اهتزاز متزامن مع التنبيه الصوتي", color = Muted, fontSize = 11.sp)
+                }
+                Switch(checked = vibrationAlertsEnabled, onCheckedChange = onVibrationChange)
+            }
+        }
+        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if (english) "Arabic voice announcements" else "التعليمات الصوتية العربية", color = Color.White)
+                        Text(if (english) "Search, order and task events" else "إعلانات بدء البحث والطلب واكتمال المهمة وتغيير التجمع", color = Muted, fontSize = 11.sp)
+                    }
+                    Switch(checked = announcementsEnabled, onCheckedChange = onAnnouncementsChange)
+                }
+                Text(if (english) "Announcement volume" else "مستوى صوت التعليمات", color = Color.White, fontSize = 12.sp)
+                Slider(value = announcementVolume, onValueChange = onAnnouncementVolumeChange, enabled = announcementsEnabled)
+                OutlinedButton(onClick = onTestAnnouncement, enabled = announcementsEnabled, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.VolumeUp, null)
+                    Spacer(Modifier.width(7.dp))
+                    Text(if (english) "Test voice" else "اختبار الصوت")
+                }
+            }
+        }
+        Text("HAMED SMART DELIVERY • 0.4.3", color = Muted, fontSize = 10.sp)
     }
 }
 

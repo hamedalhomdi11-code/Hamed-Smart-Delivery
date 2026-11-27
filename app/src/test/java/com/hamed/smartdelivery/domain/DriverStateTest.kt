@@ -4,16 +4,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DriverStateTest {
-    @Test fun orderLifecycleUsesSingleReducer() {
-        var s = DriverSnapshot()
-        val commands = listOf(DriverCommand.StartSearch, DriverCommand.OrderReceived, DriverCommand.NavigateToRestaurant, DriverCommand.ConfirmPickup, DriverCommand.NavigateToCustomer, DriverCommand.CompleteDelivery)
-        commands.forEach { c -> val result = DriverReducer.reduce(s, c); assertTrue(result.accepted); s = result.snapshot }
-        assertEquals(DriverMode.COMPLETED, s.mode)
+    @Test fun agreedThreeActionWorkflowResumesSearchAfterDelivery() {
+        var state = DriverSnapshot()
+        state = DriverReducer.reduce(state, DriverCommand.StartSearch).snapshot
+        assertEquals(DriverMode.SEARCHING, state.mode)
+        state = DriverReducer.reduce(state, DriverCommand.OrderReceived).snapshot
+        assertEquals(DriverMode.ORDER_RECEIVED, state.mode)
+        state = DriverReducer.reduce(state, DriverCommand.CompleteDelivery).snapshot
+        assertEquals(DriverMode.SEARCHING, state.mode)
     }
+
     @Test fun invalidCommandDoesNotMutateState() {
-        val s = DriverSnapshot(DriverMode.IDLE)
-        val result = DriverReducer.reduce(s, DriverCommand.OrderReceived)
+        val state = DriverSnapshot(DriverMode.IDLE)
+        val result = DriverReducer.reduce(state, DriverCommand.OrderReceived)
         assertFalse(result.accepted)
-        assertEquals(s, result.snapshot)
+        assertEquals(state, result.snapshot)
+    }
+
+    @Test fun searchCanBeStoppedAndRestarted() {
+        val searching = DriverReducer.reduce(DriverSnapshot(), DriverCommand.StartSearch).snapshot
+        val stopped = DriverReducer.reduce(searching, DriverCommand.StopSearch)
+        assertTrue(stopped.accepted)
+        assertEquals(DriverMode.IDLE, stopped.snapshot.mode)
     }
 }
