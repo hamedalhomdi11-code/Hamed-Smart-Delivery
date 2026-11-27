@@ -752,8 +752,11 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             val lastVisit = latestVisitedClusterIds.indexOfLast { it == id }
                                             val otherVisits = if (lastVisit < 0) 4 else latestVisitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
                                             lastVisit < 0 || otherVisits >= 4 || id in latestOrderProducingClusterIds
-                                        } ?: availableClusters.firstOrNull() ?: run {
-                                            routeStatus = "التجمعات القريبة مستبعدة مؤقتاً • مستمر في البحث عن تجمع آخر"
+                                        } ?: run {
+                                            routeStatus = if (availableClusters.isEmpty())
+                                                "التجمعات القريبة مستبعدة مؤقتاً • يجري توسيع البحث"
+                                            else
+                                                "تمت زيارة التجمعات القريبة • يجري البحث عن تجمع جديد وفق قاعدة عدم التكرار"
                                             return@findNearestClustersStreaming false
                                         }
                                         foundEligibleCluster = true
@@ -793,7 +796,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                             .color(AndroidColor.rgb(94, 240, 194)).width(6f)
                                                     )
                                                     routePoints = route.points
-                                                    routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                 } else if (requestId == searchRequestId) {
                                                     routeRequested = false
