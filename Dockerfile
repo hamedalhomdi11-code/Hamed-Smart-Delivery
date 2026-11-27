@@ -1,5 +1,5 @@
 FROM ghcr.io/cirruslabs/android-sdk:35
-ENV DEBIAN_FRONTEND=noninteractive ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
+ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip curl unzip osmium-tool && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install --break-system-packages --no-cache-dir pandas pyarrow shapely requests overturemaps==2.1.1
@@ -8,6 +8,8 @@ RUN sdkmanager "platforms;android-35" "build-tools;35.0.0"
 RUN curl -fsSL https://services.gradle.org/distributions/gradle-8.11.1-bin.zip -o /tmp/gradle.zip && unzip -q /tmp/gradle.zip -d /opt && rm /tmp/gradle.zip
 ENV PATH="/opt/gradle-8.11.1/bin:${PATH}"
 COPY . .
+# Keep Gradle pointed at the SDK root provided by the Cirrus Labs base image.
+RUN test -d "$ANDROID_HOME/platforms/android-35" && printf 'sdk.dir=%s\\n' "$ANDROID_HOME" > local.properties
 RUN bash scripts/build_riyadh_database.sh
 # Limit concurrent dependency requests to reduce pressure on public artifact repositories.
 RUN gradle --no-daemon --max-workers=2 --build-cache :app:testDebugUnitTest :app:assembleDebug
