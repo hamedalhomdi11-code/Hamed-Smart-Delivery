@@ -46,14 +46,16 @@ class OrderClusterDatabase(context: Context) : SQLiteOpenHelper(
                 arrayOf(id, cluster.latitude, cluster.longitude, occurredAtEpochMs)
             )
             db.execSQL(
-                """INSERT INTO order_cluster_totals(cluster_id, latitude, longitude, order_count, last_order_at_epoch_ms)
-                   VALUES(?, ?, ?, 1, ?)
-                   ON CONFLICT(cluster_id) DO UPDATE SET
-                     latitude=excluded.latitude,
-                     longitude=excluded.longitude,
-                     order_count=order_cluster_totals.order_count+1,
-                     last_order_at_epoch_ms=excluded.last_order_at_epoch_ms""".trimIndent(),
+                """INSERT OR IGNORE INTO order_cluster_totals(
+                       cluster_id, latitude, longitude, order_count, last_order_at_epoch_ms
+                   ) VALUES(?, ?, ?, 0, ?)""".trimIndent(),
                 arrayOf(id, cluster.latitude, cluster.longitude, occurredAtEpochMs)
+            )
+            db.execSQL(
+                """UPDATE order_cluster_totals
+                   SET latitude=?, longitude=?, order_count=order_count+1, last_order_at_epoch_ms=?
+                   WHERE cluster_id=?""".trimIndent(),
+                arrayOf(cluster.latitude, cluster.longitude, occurredAtEpochMs, id)
             )
             db.setTransactionSuccessful()
         } finally {
