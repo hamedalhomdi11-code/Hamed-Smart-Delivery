@@ -1001,7 +1001,7 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Switch(checked = vibrationAlertsEnabled, onCheckedChange = onVibrationChange)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.4.2", color = Muted, fontSize = 10.sp)
+        Text("HAMED SMART DELIVERY • 0.4.3", color = Muted, fontSize = 10.sp)
     }
 }
 
