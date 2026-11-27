@@ -26,11 +26,13 @@ class ArchitecturePolicyTest {
         assertTrue(ClusterPolicy.shouldAutoExclude(resumed, 361_000L))
     }
 
-    @Test fun manualSwitchIsNotAllowedBeforeTenMinutes() {
-        val wait = ClusterPolicy.enterCluster("a", 1000L)
-        assertFalse(ClusterPolicy.canManualSwitch(wait, 1000L + ClusterPolicy.MANUAL_EXCLUSION_MILLIS - 1))
-        assertTrue(ClusterPolicy.canManualSwitch(wait, 1000L + ClusterPolicy.MANUAL_EXCLUSION_MILLIS))
-        assertFalse(ClusterPolicy.canManualSwitch(ClusterPolicy.pause(wait, 30_000L), 900_000L))
+    @Test fun manualSwitchIsImmediatelyAllowedBeforeArrivalAndDuringWait() {
+        val notArrived = ClusterWaitState("a", null)
+        val waiting = ClusterPolicy.enterCluster("a", 1000L)
+        val paused = ClusterPolicy.pause(waiting, 30_000L)
+        assertTrue(ClusterPolicy.canManualSwitch(notArrived, 1000L))
+        assertTrue(ClusterPolicy.canManualSwitch(waiting, 1001L))
+        assertTrue(ClusterPolicy.canManualSwitch(paused, 30_001L))
     }
 
     @Test fun manualAndAutomaticExclusionDurationsDiffer() {
