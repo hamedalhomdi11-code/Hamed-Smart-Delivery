@@ -109,7 +109,7 @@ private fun writePersistedCluster(prefs: android.content.SharedPreferences, clus
             "selected_cluster_latitude", "selected_cluster_longitude", "selected_cluster_count",
             "selected_cluster_names", "selected_cluster_distance", "selected_cluster_search_radius",
             "selected_cluster_category", "selected_cluster_id", "selected_cluster_district", "selected_cluster_radius"
-        ).forEach(editor::remove)
+        ).forEach { editor.remove(it) }
     } else {
         editor.putString("selected_cluster_latitude", cluster.latitude.toString())
             .putString("selected_cluster_longitude", cluster.longitude.toString())
@@ -199,8 +199,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
     var trackingActive by remember { mutableStateOf(false) }
     var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
-    var perspective3D by remember { mutableStateOf(false) }
-    var english by remember { mutableStateOf(false) }
+    var perspective3D by remember { mutableStateOf(workflowPrefs.getBoolean("perspective_3d", true)) }
+    var english by remember { mutableStateOf(workflowPrefs.getBoolean("english", false))}
     val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
     var selected by remember { mutableIntStateOf(uiStatePrefs.getInt("selected_tab", 0).coerceIn(0, 3)) }
     var mapExpanded by remember { mutableStateOf(false) }
