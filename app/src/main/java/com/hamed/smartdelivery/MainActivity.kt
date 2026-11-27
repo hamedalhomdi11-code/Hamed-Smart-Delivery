@@ -250,6 +250,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
     var searchRequestId by remember { mutableIntStateOf(if (restoredDriverMode == DriverMode.SEARCHING) 1 else 0) }
     var manualSwitchRequestId by remember { mutableIntStateOf(0) }
+    var recenterRequestId by remember { mutableIntStateOf(0) }
     var selectedCluster by remember { mutableStateOf(readPersistedCluster(workflowPrefs)) }
     var excludedClusters by remember { mutableStateOf(readPersistedExclusions(workflowPrefs)) }
     val clusterPrefs = remember { context.getSharedPreferences("cluster_visit_history", Context.MODE_PRIVATE) }
@@ -401,13 +402,13 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, recenterRequestId, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
                         }
                         Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                            MapAction(Icons.Rounded.MyLocation, toggleTracking)
+                            MapAction(Icons.Rounded.MyLocation) { recenterRequestId += 1 }
                             MapAction(Icons.Rounded.Layers) { perspective3D = !perspective3D }
                             MapAction(if (mapExpanded) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen) { mapExpanded = !mapExpanded }
                         }
@@ -497,7 +498,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, searchActive: Boolean, clusterWaitStartedAt: Long?, selectedClusterId: String?, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, recenterRequestId: Int, searchActive: Boolean, clusterWaitStartedAt: Long?, selectedClusterId: String?, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -505,6 +506,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
+    var followUserCamera by remember { mutableStateOf(true) }
+    var latestUserLocation by remember { mutableStateOf<Location?>(null) }
     var lastArrowBearing by remember { mutableFloatStateOf(Float.NaN) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     var currentBearing by remember { mutableFloatStateOf(0f) }
@@ -562,6 +565,31 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
+    DisposableEffect(mapLibreMap, styleReady) {
+        val map = mapLibreMap
+        if (map == null || !styleReady) onDispose { } else {
+            val cameraListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) followUserCamera = false
+            }
+            map.addOnCameraMoveStartedListener(cameraListener)
+            onDispose { map.removeOnCameraMoveStartedListener(cameraListener) }
+        }
+    }
+
+    LaunchedEffect(recenterRequestId, mapLibreMap, styleReady) {
+        val map = mapLibreMap
+        val location = latestUserLocation
+        if (recenterRequestId > 0 && map != null && styleReady && location != null) {
+            followUserCamera = true
+            map.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder().target(LatLng(location.latitude, location.longitude))
+                        .zoom(16.5).tilt(if (perspective3D) 58.0 else 0.0).build()
+                ), 650
+            )
+        }
+    }
+
     LaunchedEffect(mapLibreMap, styleReady, perspective3D) {
         if (styleReady) mapLibreMap?.let { map ->
             val current = map.cameraPosition
@@ -589,6 +617,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
+                    latestUserLocation = Location(location)
                     val clusterAtLocation = currentCluster
                     if (searchActive && clusterAtLocation != null && !autoSwitchTriggered) {
                         val clusterDistance = FloatArray(1)
@@ -640,7 +669,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     val previousCameraLocation = lastCameraLocation
-                    val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
+                    val shouldFollow = followUserCamera && (firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f)))
                     if (shouldFollow) {
                         firstFix = false
                         val bearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing.toDouble() else map.cameraPosition.bearing
