@@ -703,7 +703,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         )
                         lastCameraLocation = Location(location)
                     }
-                    if (searchActive && searchRequestId > lastProcessedSearch) {
+                    if (searchActive && (searchRequestId > lastProcessedSearch || currentCluster == null)) {
                         lastProcessedSearch = searchRequestId
                         val requestId = searchRequestId
                         routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
