@@ -348,6 +348,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
     var showMapProviderDialog by remember { mutableStateOf(false) }
     var mapProviderNotice by remember { mutableStateOf("") }
+    var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
+    var clusterEnteredAt by remember { mutableStateOf<Long?>(null) }
+    var autoSwitchTriggered by remember { mutableStateOf(false) }
     var ttsReady by remember { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
     LaunchedEffect(ttsReady) {
@@ -407,7 +410,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, searchActive) {
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, searchActive, excludedClusters, visitedClusterIds, orderProducingClusterIds) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission || gpsMode == GpsMode.STOPPED) {
             onDispose { }
@@ -424,6 +427,28 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
+                    val clusterAtLocation = currentCluster
+                    if (searchActive && clusterAtLocation != null && !autoSwitchTriggered) {
+                        val clusterDistance = FloatArray(1)
+                        Location.distanceBetween(
+                            location.latitude, location.longitude,
+                            clusterAtLocation.latitude, clusterAtLocation.longitude,
+                            clusterDistance
+                        )
+                        val radius = clusterAtLocation.clusterRadiusMeters.takeIf { it > 0.0 } ?: 150.0
+                        val now = System.currentTimeMillis()
+                        if (clusterDistance[0].toDouble() <= radius) {
+                            if (clusterEnteredAt == null) {
+                                clusterEnteredAt = now
+                                onClusterEntered(clusterStableId(clusterAtLocation))
+                            }
+                            val enteredAt = clusterEnteredAt
+                            if (enteredAt != null && now - enteredAt >= 5 * 60 * 1000L) {
+                                autoSwitchTriggered = true
+                                onAutoExclude(clusterStableId(clusterAtLocation), now + 15 * 60 * 1000L)
+                            }
+                        }
+                    }
                     if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
                     // The driver symbol is rendered as a single centered overlay (car in tracking,
                     // direction arrow in navigation), so the map never shows a pin and arrow together.
@@ -483,7 +508,24 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                 existingClusterMarker.title = "تجمع مطاعم • ${cluster.restaurantCount}"
                                             }
                                         }
-                                        val best = updatedClusters.firstOrNull() ?: return@findNearestClustersStreaming
+                                        val now = System.currentTimeMillis()
+                                        val best = updatedClusters.firstOrNull { cluster ->
+                                            val id = clusterStableId(cluster)
+                                            val excludedUntil = excludedClusters[id]
+                                            val isExcluded = excludedUntil != null && excludedUntil > now
+                                            val lastVisit = visitedClusterIds.indexOfLast { it == id }
+                                            val otherVisits = if (lastVisit < 0) 4 else visitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
+                                            val repeatAllowed = lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
+                                            !isExcluded && repeatAllowed
+                                        } ?: run {
+                                            routeStatus = "جميع التجمعات القريبة مستبعدة مؤقتاً أو لم يحن وقت تكرارها"
+                                            return@findNearestClustersStreaming
+                                        }
+                                        if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
+                                            currentCluster = best
+                                            clusterEnteredAt = null
+                                            autoSwitchTriggered = false
+                                        }
                                         onClusterSelected(best)
                                         val nextDestination = DeliveryDestination(best.latitude, best.longitude)
                                         val previousDestination = activeDestination
