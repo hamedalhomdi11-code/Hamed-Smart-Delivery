@@ -117,6 +117,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var selected by remember { mutableIntStateOf(0) }
     var mapExpanded by remember { mutableStateOf(false) }
     var searchRequestId by remember { mutableIntStateOf(0) }
+    var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
     var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -166,7 +167,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING)
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, onClusterSelected = { selectedCluster = it })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -183,14 +184,27 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         }
                     }
                     if (!mapExpanded) Dashboard(driverSnapshot, english) { command ->
-                        if (command == DriverCommand.StartSearch) {
-                            if (!hasLocationPermission) {
-                                pendingSearchAfterPermission = true
-                                requestLocationPermissions()
-                            } else searchRequestId += 1
+                        if (command == DriverCommand.StartSearch && !hasLocationPermission) {
+                            pendingSearchAfterPermission = true
+                            requestLocationPermissions()
                         }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
-                        if (transition.accepted) driverSnapshot = transition.snapshot
+                        if (transition.accepted) {
+                            when (command) {
+                                DriverCommand.OrderReceived -> {
+                                    selectedCluster?.let { cluster ->
+                                        runCatching { OrderClusterDatabase(context).recordOrder(cluster) }
+                                    }
+                                }
+                                DriverCommand.CompleteDelivery -> {
+                                    // A fresh request ID restarts discovery after the delivery pause.
+                                    searchRequestId += 1
+                                }
+                                else -> Unit
+                            }
+                            driverSnapshot = transition.snapshot
+                            if (command == DriverCommand.StartSearch && hasLocationPermission) searchRequestId += 1
+                        }
                     }
                 } else {
                     Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp)) {
@@ -261,7 +275,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, onClusterSelected: (RestaurantCluster) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -436,6 +450,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             }
                                         }
                                         val best = updatedClusters.firstOrNull() ?: return@findNearestClustersStreaming
+                                        onClusterSelected(best)
                                         val nextDestination = DeliveryDestination(best.latitude, best.longitude)
                                         val previousDestination = activeDestination
                                         val destinationChanged = if (previousDestination == null) true else {
