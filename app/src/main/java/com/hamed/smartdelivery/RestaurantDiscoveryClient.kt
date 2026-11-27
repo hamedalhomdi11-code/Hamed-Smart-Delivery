@@ -85,7 +85,7 @@ object RestaurantDiscoveryClient {
             val candidates = rankedAll.filter { it.distanceMeters <= radius }
             if (candidates.isEmpty()) continue
             lastCandidates = candidates
-            if (onUpdate(candidates.take(30))) return candidates
+            if (onUpdate(candidates)) return candidates
         }
 
         // Riyadh's local DB covers a wider metro boundary than the initial 5 km
@@ -93,7 +93,7 @@ object RestaurantDiscoveryClient {
         // nearest real DB clusters rather than reporting that the database is empty.
         val insideRiyadhCoverage = latitude in 24.05..25.15 && longitude in 46.20..47.35
         if (insideRiyadhCoverage) {
-            val nearestFallback = rankedAll.sortedBy { it.distanceMeters }.take(30)
+            val nearestFallback = rankedAll.sortedBy { it.distanceMeters }
             if (nearestFallback.isNotEmpty()) {
                 lastCandidates = nearestFallback
                 if (onUpdate(nearestFallback)) return nearestFallback
