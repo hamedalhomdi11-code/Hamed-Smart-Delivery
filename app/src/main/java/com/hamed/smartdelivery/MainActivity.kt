@@ -387,11 +387,30 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (!hasLocationPermission) {
             requestLocationPermissions()
         } else {
-            if (gpsMode == GpsMode.STOPPED) {
-                ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            } else {
-                // Send the service's explicit STOP command; do not bypass its state/notification cleanup.
-                context.startService(Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_STOP))
+            // Read the service's persisted truth at click time instead of relying on a possibly
+            // one-frame-old Compose state while the foreground-service broadcast is in flight.
+            val activeNow = context.getSharedPreferences(
+                LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE
+            ).getBoolean(LocationTrackingService.KEY_ACTIVE, trackingActive)
+            try {
+                if (activeNow) {
+                    context.startService(
+                        Intent(context, LocationTrackingService::class.java)
+                            .setAction(LocationTrackingService.ACTION_STOP)
+                    )
+                } else {
+                    ContextCompat.startForegroundService(
+                        context,
+                        Intent(context, LocationTrackingService::class.java)
+                            .setAction(LocationTrackingService.ACTION_START)
+                    )
+                }
+            } catch (error: Exception) {
+                android.widget.Toast.makeText(
+                    context,
+                    "تعذر تغيير حالة التتبع: ${error.localizedMessage ?: error.javaClass.simpleName}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
