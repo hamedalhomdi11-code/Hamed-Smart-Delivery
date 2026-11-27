@@ -67,3 +67,4 @@ Verification status for this recovery patch:
 - Physical-device GPS start/stop, map route drawing, background behavior and battery checks: still require testing on the user's phone.
 - No merge to the default branch, no change to the Hamed Maps server, and no change to the source Riyadh database schema.
 - Map discovery and route jobs now read changing visit/exclusion and display preferences without tearing down the live location listener; if a route request is canceled during lifecycle cleanup, its pending flag is reset so the next GPS fix can retry.
+- The Render image build now refuses to publish unless the 0.4.3 APK exists, contains the bundled Riyadh SQLite asset, reports versionName 0.4.3, and passes apksigner verification; it publishes APK SHA-256 and certificate details for inspection.
