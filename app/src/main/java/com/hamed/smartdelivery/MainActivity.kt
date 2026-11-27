@@ -379,7 +379,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
     }
-    // Location permission is intentionally not requested in this safe build profile.
+    // GPS permission is requested at launch; the foreground location service owns the live session.
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
