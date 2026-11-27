@@ -259,10 +259,14 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         }
     }
     var previousSearchRequestId by remember { mutableIntStateOf(searchRequestId) }
-    LaunchedEffect(searchRequestId) {
-        if (searchRequestId > previousSearchRequestId && driverSnapshot.mode == DriverMode.SEARCHING)
+    var previousSearchMode by remember { mutableStateOf(driverSnapshot.mode) }
+    LaunchedEffect(searchRequestId, driverSnapshot.mode) {
+        if (searchRequestId > previousSearchRequestId &&
+            driverSnapshot.mode == DriverMode.SEARCHING && previousSearchMode == DriverMode.SEARCHING) {
             announceArabic("تم تغيير التجمع. يجري البحث عن التجمع التالي")
+        }
         previousSearchRequestId = searchRequestId
+        previousSearchMode = driverSnapshot.mode
     }
     LaunchedEffect(clusterWaitStartedAt) {
         if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
