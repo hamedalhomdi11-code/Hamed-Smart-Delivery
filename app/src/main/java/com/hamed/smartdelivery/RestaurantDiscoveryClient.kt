@@ -3,7 +3,6 @@ package com.hamed.smartdelivery
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.ln
 import com.hamed.smartdelivery.domain.ClusterCandidate
 import com.hamed.smartdelivery.domain.ClusterScoring
 
@@ -45,21 +44,20 @@ object RestaurantDiscoveryClient {
             val stats = try { orderDatabase.orderStats() } finally { orderDatabase.close() }
             places to stats
         }
-        val radii = listOf(1000, 3000, radiusMeters.coerceIn(3000, 15000)).distinct().sorted()
-        var best: List<RestaurantCluster> = emptyList()
-
-        for (radius in radii) {
-            val nearby = allClusters.map { cluster ->
-                cluster.copy(
-                    distanceMeters = RiyadhPlacesDatabase.distanceMeters(
-                        latitude, longitude, cluster.latitude, cluster.longitude
-                    ),
-                    searchRadiusMeters = radius
-                )
-            }.filter { it.distanceMeters <= radius }
-
-            val now = System.currentTimeMillis()
-            val rankedIds = ClusterScoring.rank(nearby.map { cluster ->
+        // Expand the search progressively. The old implementation stopped at 5 km,
+        // which left drivers in Riyadh outskirts in an endless empty-results loop.
+        // The callback returns true only after it has selected a non-excluded cluster.
+        val radii = listOf(1000, 3000, 5000, 8000, 12000, 15000)
+        val now = System.currentTimeMillis()
+        val rankedAll = allClusters.map { cluster ->
+            cluster.copy(
+                distanceMeters = RiyadhPlacesDatabase.distanceMeters(
+                    latitude, longitude, cluster.latitude, cluster.longitude
+                ),
+                searchRadiusMeters = 15000
+            )
+        }.let { measured ->
+            val scores = ClusterScoring.rank(measured.map { cluster ->
                 val id = cluster.clusterId?.takeIf { it.isNotBlank() }
                     ?: "geo:" + String.format(java.util.Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
                 val observed = observedStats[id]
@@ -68,22 +66,40 @@ object RestaurantDiscoveryClient {
                     distanceKm = cluster.distanceMeters / 1000.0,
                     restaurantCount = cluster.restaurantCount,
                     observedOrders = observed?.orderCount ?: 0,
-                    hoursSinceLastObservedOrder = observed?.let { (now - it.lastOrderAtEpochMs).coerceAtLeast(0L) / 3_600_000.0 },
+                    hoursSinceLastObservedOrder = observed?.let {
+                        (now - it.lastOrderAtEpochMs).coerceAtLeast(0L) / 3_600_000.0
+                    },
                     publicRating = null,
                     estimatedFuelCostSar = null
                 )
-            }).mapIndexed { index, ranked -> ranked.candidate.id to ranked.score }.toMap()
-            val sortedNearby = nearby.sortedByDescending { cluster ->
+            }).associate { it.candidate.id to it.score }
+            measured.sortedByDescending { cluster ->
                 val id = cluster.clusterId?.takeIf { it.isNotBlank() }
                     ?: "geo:" + String.format(java.util.Locale.US, "%.5f:%.5f", cluster.latitude, cluster.longitude)
-                rankedIds[id] ?: 0.0
-            }
-
-            if (nearby.isNotEmpty()) {
-                best = sortedNearby
-                onUpdate(sortedNearby.take(30))
+                scores[id] ?: 0.0
             }
         }
-        return best
+
+        var lastCandidates: List<RestaurantCluster> = emptyList()
+        for (radius in radii) {
+            val candidates = rankedAll.filter { it.distanceMeters <= radius }
+            if (candidates.isEmpty()) continue
+            lastCandidates = candidates
+            if (onUpdate(candidates.take(30))) return candidates
+        }
+
+        // Riyadh's local DB covers a wider metro boundary than the initial 5 km
+        // search. If no eligible cluster exists within 15 km, still surface the
+        // nearest real DB clusters rather than reporting that the database is empty.
+        val insideRiyadhCoverage = latitude in 24.05..25.15 && longitude in 46.20..47.35
+        if (insideRiyadhCoverage) {
+            val nearestFallback = rankedAll.sortedBy { it.distanceMeters }.take(30)
+            if (nearestFallback.isNotEmpty()) {
+                lastCandidates = nearestFallback
+                if (onUpdate(nearestFallback)) return nearestFallback
+            }
+        }
+
+        return lastCandidates
     }
 }
