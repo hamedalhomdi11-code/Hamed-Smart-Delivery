@@ -14,6 +14,12 @@ import android.graphics.Color as AndroidColor
 import android.os.Looper
 import android.os.SystemClock
 import android.os.Build
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.os.VibrationEffect
+import android.os.Handler
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import android.os.Bundle
@@ -75,6 +81,25 @@ private val Panel = Color(0xFF101F2D)
 private val Mint = Color(0xFF5EF0C2)
 private val Cyan = Color(0xFF53C7F4)
 private val Muted = Color(0xFF8EA5B8)
+
+private fun alertRouteChanged(context: Context) {
+    runCatching {
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(VibratorManager::class.java).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        if (vibrator.hasVibrator()) {
+            vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 220, 100, 220), -1))
+        }
+    }
+    runCatching {
+        val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90)
+        tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 850)
+        Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, 1000L)
+    }
+}
 
 class MainActivity : ComponentActivity() {
     private var sharedDestination by mutableStateOf<DeliveryDestination?>(null)
@@ -607,7 +632,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     routeSteps = updated.steps
                                     currentStepIndex = 0
                                     nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                    if (navigationActive && ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
+                                    alertRouteChanged(context)
+                                    if (ttsReady) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
                                     routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
                                 } else {
                                     routeStatus = "تعذر تحديث المسار حالياً"
