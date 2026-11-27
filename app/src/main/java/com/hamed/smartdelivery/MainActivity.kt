@@ -147,7 +147,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var selected by remember { mutableIntStateOf(0) }
     var mapExpanded by remember { mutableStateOf(false) }
     var searchRequestId by remember { mutableIntStateOf(0) }
+    var manualSwitchRequestId by remember { mutableIntStateOf(0) }
     var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
+    var excludedClusters by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    var visitedClusterIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val routeAlertPrefs = remember { context.getSharedPreferences("route_alert_preferences", Context.MODE_PRIVATE) }
     var soundAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("sound", true)) }
     var vibrationAlertsEnabled by remember { mutableStateOf(routeAlertPrefs.getBoolean("vibration", true)) }
@@ -212,7 +216,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, onClusterSelected = { selectedCluster = it })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) visitedClusterIds = visitedClusterIds + id }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); searchRequestId += 1 })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -228,7 +232,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    if (!mapExpanded) Dashboard(driverSnapshot, english) { command ->
+                    if (!mapExpanded) Dashboard(driverSnapshot, english, onManualSwitch = { selectedCluster?.let { cluster -> excludedClusters = excludedClusters + (clusterStableId(cluster) to (System.currentTimeMillis() + 10 * 60 * 1000L)); selectedCluster = null; manualSwitchRequestId += 1; searchRequestId += 1 } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
                             requestLocationPermissions()
@@ -243,6 +247,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                                 DriverCommand.OrderReceived -> {
                                     selectedCluster?.let { cluster ->
                                         runCatching { OrderClusterDatabase(context).recordOrder(cluster) }
+                                        orderProducingClusterIds = orderProducingClusterIds + clusterStableId(cluster)
                                     }
                                 }
                                 DriverCommand.CompleteDelivery -> {
@@ -324,7 +329,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, onClusterSelected: (RestaurantCluster) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, searchActive: Boolean, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
