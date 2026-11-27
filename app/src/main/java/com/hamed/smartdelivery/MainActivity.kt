@@ -11,6 +11,8 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.graphics.Color as AndroidColor
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Looper
 import android.os.SystemClock
 import android.os.Build
@@ -64,6 +66,7 @@ import androidx.core.content.ContextCompat
 import org.maplibre.android.MapLibre
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.PolylineOptions
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -191,6 +194,7 @@ class MainActivity : ComponentActivity() {
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     val workflowPrefs = remember { context.getSharedPreferences("workflow_state", Context.MODE_PRIVATE) }
+    val gpsPrefs = remember { context.getSharedPreferences(LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE) }
     var announcementsEnabled by remember { mutableStateOf(workflowPrefs.getBoolean("announcements_enabled", true)) }
     var announcementVolume by remember { mutableFloatStateOf(workflowPrefs.getFloat("announcement_volume", 0.85f).coerceIn(0f, 1f)) }
     var speechReady by remember { mutableStateOf(false) }
@@ -210,13 +214,13 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!)
         }.getOrDefault(DriverMode.IDLE)
         // A previously active search cannot be resumed without a verified location session.
-        if (savedMode == DriverMode.SEARCHING) DriverMode.IDLE else savedMode
+        if (savedMode == DriverMode.SEARCHING && !gpsPrefs.getBoolean(LocationTrackingService.KEY_ACTIVE, false)) DriverMode.IDLE else savedMode
     }
     var driverSnapshot by remember {
         mutableStateOf(DriverSnapshot(restoredDriverMode, workflowPrefs.getString("last_command_id", null)))
     }
-    var trackingActive by remember { mutableStateOf(false) }
-    var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
+    var trackingActive by remember { mutableStateOf(gpsPrefs.getBoolean(LocationTrackingService.KEY_ACTIVE, false)) }
+    var gpsMode by remember { mutableStateOf(if (trackingActive) GpsMode.TRACKING else GpsMode.STOPPED) }
     var perspective3D by remember { mutableStateOf(workflowPrefs.getBoolean("perspective_3d", true)) }
     var english by remember { mutableStateOf(workflowPrefs.getBoolean("english", false))}
     val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
@@ -273,6 +277,16 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
             announceArabic("بدأ مؤقت انتظار التجمع لمدة خمس دقائق")
     }
+    LaunchedEffect(driverSnapshot.mode, announcementsEnabled) {
+        if (driverSnapshot.mode == DriverMode.ORDER_RECEIVED && announcementsEnabled) {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                delay(150_000L)
+                if (driverSnapshot.mode == DriverMode.ORDER_RECEIVED && announcementsEnabled) {
+                    announceArabic("هل انتهيت من توصيل طلبك؟ إذا انتهيت، يرجى الضغط على زر انتهاء المهمة")
+                }
+            }
+        }
+    }
     LaunchedEffect(selectedCluster) { writePersistedCluster(workflowPrefs, selectedCluster) }
     LaunchedEffect(excludedClusters) {
         val encoded = excludedClusters.entries.joinToString("|") { "${Uri.encode(it.key)}=${it.value}" }
@@ -322,13 +336,33 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             trackingActive = true
             gpsMode = GpsMode.TRACKING
             if (pendingSearchAfterPermission) {
-                searchRequestId += 1
+                val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.StartSearch)
+                if (transition.accepted) {
+                    driverSnapshot = transition.snapshot
+                    searchRequestId += 1
+                }
                 pendingSearchAfterPermission = false
             }
+        } else {
+            pendingSearchAfterPermission = false
         }
     }
-    // Safe build profile: location tracking and live navigation are disabled.
-    val requestLocationPermissions: () -> Unit = { }
+    val requestLocationPermissions: () -> Unit = {
+        locationPermissionLauncher.launch(arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.POST_NOTIFICATIONS
+        ))
+    }
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            requestLocationPermissions()
+        } else {
+            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+            trackingActive = true
+            gpsMode = GpsMode.TRACKING
+        }
+    }
     LaunchedEffect(Unit) {
         val database = OrderClusterDatabase(context)
         orderProducingClusterIds = withContext(Dispatchers.IO) {
@@ -621,9 +655,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
-                    // The driver symbol is rendered as a single centered overlay (car in tracking,
-                    // direction arrow in navigation), so the map never shows a pin and arrow together.
-                    userMarker?.let { map.removeMarker(it); userMarker = null }
+                    // The live arrow is a geographic map marker: it moves with the user's coordinates.
+                    val arrowBearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing else map.cameraPosition.bearing.toFloat()
+                    if (userMarker == null) {
+                        userMarker = map.addMarker(
+                            MarkerOptions().position(point)
+                                .icon(createLocationArrowIcon(context))
+                                .rotation(arrowBearing)
+                                .title("موقعك الحالي")
+                        )
+                    } else {
+                        userMarker?.position = point
+                        userMarker?.rotation = arrowBearing
+                    }
                     val previousCameraLocation = lastCameraLocation
                     val navigating = navigationActive && activeDestination != null
                     val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
@@ -731,7 +775,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                     routeSteps = route.steps
                                                     currentStepIndex = 0
                                                     nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                                    routeStatus = "تم رسم المسار • اضغط ابدأ الملاحة لبدء التوجيه"
+                                                    routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                 } else if (requestId == searchRequestId) {
                                                     routeRequested = false
@@ -868,11 +912,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 }
             }
             try {
-                val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
-                locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
-                // Use a cached fix immediately: discovery and route calculation must work while the driver is stationary.
-                (locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))?.let { listener.onLocationChanged(it) }
+                var requestedProvider = false
+                for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+                    if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
+                        locationManager.requestLocationUpdates(provider, 2500L, 3f, listener, Looper.getMainLooper())
+                        requestedProvider = true
+                    }
+                }
+                // Use the newest cached fix immediately, then keep receiving live GPS/network fixes.
+                val cachedFix = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                    .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
+                    .maxByOrNull { it.time }
+                cachedFix?.let { listener.onLocationChanged(it) }
+                if (!requestedProvider) routeStatus = "يرجى تفعيل خدمة الموقع GPS من إعدادات الهاتف"
             } catch (_: SecurityException) {
                 // Permission may be revoked while the map is open.
             } catch (_: IllegalArgumentException) {
@@ -887,6 +939,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 pharmacyMarkers.values.forEach { map.removeMarker(it) }
                 pharmacyMarkers.clear()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
+                userMarker?.let { map.removeMarker(it); userMarker = null }
             }
         }
     }
@@ -897,22 +950,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
-        if (gpsMode == GpsMode.TRACKING) {
-            Surface(
-                modifier = Modifier.align(Alignment.Center).size(42.dp),
-                color = Panel.copy(alpha = .96f),
-                shape = CircleShape
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Navigation,
-                        null,
-                        tint = Mint,
-                        modifier = Modifier.size(26.dp).rotate(currentBearing)
-                    )
-                }
-            }
-        }
+
         if (nextTurnInstruction.isNotBlank()) {
             Surface(
                 modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 70.dp, vertical = 12.dp),
@@ -973,6 +1011,16 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             }
         }
     }
+}
+
+private fun createLocationArrowIcon(context: Context): org.maplibre.android.annotations.Icon {
+    val drawable = ContextCompat.getDrawable(context, R.drawable.ic_location_arrow)
+        ?: error("Location arrow drawable is missing")
+    val bitmap = Bitmap.createBitmap(72, 72, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, 72, 72)
+    drawable.draw(canvas)
+    return IconFactory.getInstance(context).fromBitmap(bitmap)
 }
 
 @Composable
