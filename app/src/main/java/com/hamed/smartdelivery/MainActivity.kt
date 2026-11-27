@@ -865,7 +865,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 displayedRoutePolyline = null
                                 displayedRoutePolyline = map.addPolyline(
                                     PolylineOptions().addAll(route.points)
-                                        .color(AndroidColor.rgb(94, 240, 194))
+                                        .color(AndroidColor.rgb(166, 187, 205))
                                         .width(6f)
                                 )
                                 routePoints = route.points
@@ -898,7 +898,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 displayedRoutePolyline = null
                                     displayedRoutePolyline = map.addPolyline(
                                         PolylineOptions().addAll(updated.points)
-                                            .color(AndroidColor.rgb(94, 240, 194))
+                                            .color(AndroidColor.rgb(166, 187, 205))
                                             .width(6f)
                                     )
                                     routePoints = updated.points
