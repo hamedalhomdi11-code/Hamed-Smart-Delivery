@@ -1,13 +1,14 @@
 package com.hamed.smartdelivery.domain
 
-/** GPS cycle: stopped -> tracking (car marker) -> navigation (arrow) -> stopped -> tracking. */
-enum class GpsMode { STOPPED, TRACKING, NAVIGATION }
+/**
+ * The app exposes a single tracking state; turn-by-turn navigation is not an app mode.
+ */
+enum class GpsMode { STOPPED, TRACKING }
 
 object GpsModeCycle {
     fun next(current: GpsMode): GpsMode = when (current) {
         GpsMode.STOPPED -> GpsMode.TRACKING
-        GpsMode.TRACKING -> GpsMode.NAVIGATION
-        GpsMode.NAVIGATION -> GpsMode.STOPPED
+        GpsMode.TRACKING -> GpsMode.STOPPED
     }
 }
 
@@ -22,11 +23,36 @@ object ClusterPolicy {
     const val EXIT_GRACE_MILLIS = 15 * 1000L
 
     fun enterCluster(clusterId: String, now: Long) = ClusterWaitState(clusterId, now)
+
+    /** A wait only expires after five full minutes of accumulated, unpaused time. */
     fun shouldAutoExclude(wait: ClusterWaitState, now: Long): Boolean {
         val start = wait.enteredAtEpochMillis ?: return false
-        if (wait.pausedAtEpochMillis != null) return false
+        if (wait.pausedAtEpochMillis != null || now < start) return false
         return now - start >= WAIT_MILLIS
     }
+
+    fun pause(wait: ClusterWaitState, now: Long): ClusterWaitState =
+        if (wait.enteredAtEpochMillis == null || wait.pausedAtEpochMillis != null || now < wait.enteredAtEpochMillis) wait
+        else wait.copy(pausedAtEpochMillis = now)
+
+    /** Shift the start forward by the paused duration so paused time is never counted. */
+    fun resume(wait: ClusterWaitState, now: Long): ClusterWaitState {
+        val pausedAt = wait.pausedAtEpochMillis ?: return wait
+        val start = wait.enteredAtEpochMillis ?: return wait.copy(pausedAtEpochMillis = null)
+        if (now < pausedAt) return wait
+        return wait.copy(enteredAtEpochMillis = start + (now - pausedAt), pausedAtEpochMillis = null)
+    }
+
+    fun leave(wait: ClusterWaitState): ClusterWaitState =
+        wait.copy(enteredAtEpochMillis = null, pausedAtEpochMillis = null)
+
+    /** Manual switching is eligible only after ten minutes at the current cluster. */
+    fun canManualSwitch(wait: ClusterWaitState, now: Long): Boolean {
+        val start = wait.enteredAtEpochMillis ?: return false
+        if (wait.pausedAtEpochMillis != null || now < start) return false
+        return now - start >= MANUAL_EXCLUSION_MILLIS
+    }
+
     fun manualSwitch(clusterId: String, now: Long) = ClusterExclusion(clusterId, now + MANUAL_EXCLUSION_MILLIS)
     fun automaticTimeout(clusterId: String, now: Long) = ClusterExclusion(clusterId, now + AUTO_EXCLUSION_MILLIS)
     fun isTemporarilyExcluded(exclusion: ClusterExclusion?, now: Long) =
