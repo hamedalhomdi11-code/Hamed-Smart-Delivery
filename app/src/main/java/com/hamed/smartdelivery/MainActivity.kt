@@ -784,7 +784,7 @@ private fun MapAction(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 }
 
 @Composable
-private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (DriverCommand) -> Unit) {
+private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
     val mode = snapshot.mode
     val title = when (mode) {
         DriverMode.IDLE -> if (english) "Ready" else "جاهز للبحث"
@@ -829,6 +829,18 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, onCommand: (Dr
             }
         }
         if (mode == DriverMode.SEARCHING) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onManualSwitch, modifier = Modifier.weight(1f).height(37.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
+                    Text(if (english) "SWITCH CLUSTER" else "تبديل التجمع", fontSize = 10.sp)
+                }
+                OutlinedButton(onClick = onResetExclusions, modifier = Modifier.weight(1f).height(37.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Mint)) {
+                    Text(if (english) "RESET EXCLUSIONS" else "إعادة تهيئة التجمعات", fontSize = 10.sp)
+                }
+            }
             Spacer(Modifier.height(5.dp))
             Text(if (english) "The app keeps searching between suitable clusters automatically." else "يستمر التطبيق في البحث والتنقل بين التجمعات تلقائياً.", color = Muted, fontSize = 10.sp)
         }
