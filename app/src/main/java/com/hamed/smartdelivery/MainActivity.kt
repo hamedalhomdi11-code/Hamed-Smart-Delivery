@@ -401,7 +401,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
 
     DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, searchActive) {
         val map = mapLibreMap
-        if (map == null || !styleReady || !hasLocationPermission) {
+        if (map == null || !styleReady || !hasLocationPermission || gpsMode == GpsMode.STOPPED) {
             onDispose { }
         } else {
             val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
