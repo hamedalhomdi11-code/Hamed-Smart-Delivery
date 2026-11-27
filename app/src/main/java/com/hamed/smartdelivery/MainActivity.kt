@@ -1060,10 +1060,10 @@ private fun PlacesScreen(english: Boolean) {
         Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Icon(Icons.Rounded.Restaurant, null, tint = Mint, modifier = Modifier.size(28.dp))
-                Text(if (english) "Restaurant discovery is being connected" else "يجري تجهيز اكتشاف المطاعم", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(if (english) "Riyadh restaurant clusters are available" else "اكتشاف تجمعات المطاعم من قاعدة الرياض", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
-                    if (english) "The ranking model separates public map signals from your observed order history. No live demand is fabricated. Nearby restaurant feeds and saved observations are not active yet."
-                    else "نموذج الترتيب يفرّق بين إشارات الخرائط العامة وسجل الطلبات الذي ترصده بنفسك. لن نخترع طلباً أو ازدحاماً غير حقيقي. مصادر المطاعم القريبة وحفظ الملاحظات لم تُفعّل بعد.",
+                    if (english) "Restaurant and cafe clusters are read from the bundled Riyadh database and ranked by distance, density and manually confirmed order history. No live HungerStation order feed is connected, and no demand is fabricated."
+                    else "يتم جلب تجمعات المطاعم والمقاهي من قاعدة الرياض المحلية وترتيبها حسب المسافة والكثافة وسجل الطلبات الذي تؤكده يدوياً. لا توجد تغذية طلبات مباشرة من هنقرستيشن حالياً، ولا يتم اختراع طلب أو ازدحام.",
                     color = Muted, fontSize = 12.sp
                 )
             }
