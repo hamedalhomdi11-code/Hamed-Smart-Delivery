@@ -292,8 +292,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                     }
                 }
                 if (!mapExpanded) NavigationBar(containerColor = Color(0xFF0B1723), contentColor = Mint) {
-                    val labels = if (english) listOf("Drive", "Orders", "Places", "Profile") else listOf("الملاحة", "الطلبات", "التجمعات", "حسابي")
-                    val icons = listOf(Icons.Rounded.Navigation, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
+                    val labels = if (english) listOf("Home", "Orders", "Places", "Profile") else listOf("الرئيسية", "الطلبات", "التجمعات", "حسابي")
+                    val icons = listOf(Icons.Rounded.Home, Icons.Rounded.ReceiptLong, Icons.Rounded.Restaurant, Icons.Rounded.Person)
                     labels.forEachIndexed { i, label ->
                         NavigationBarItem(selected = selected == i, onClick = { selected = i }, icon = { Icon(icons[i], null) },
                             label = { Text(label, fontSize = 10.sp) },
@@ -763,7 +763,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        if (gpsMode == GpsMode.TRACKING) Icons.Rounded.DirectionsCar else Icons.Rounded.Navigation,
+                        Icons.Rounded.Navigation,
                         null,
                         tint = Mint,
                         modifier = Modifier.size(26.dp).rotate(currentBearing)
