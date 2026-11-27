@@ -68,6 +68,7 @@ import com.hamed.smartdelivery.domain.DriverCommand
 import com.hamed.smartdelivery.domain.DriverMode
 import com.hamed.smartdelivery.domain.DriverReducer
 import com.hamed.smartdelivery.domain.DriverSnapshot
+import com.hamed.smartdelivery.domain.GpsMode
 
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
@@ -112,6 +113,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     var driverSnapshot by remember { mutableStateOf(DriverSnapshot()) }
     var trackingActive by remember { mutableStateOf(false) }
+    var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
     var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
@@ -133,6 +135,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
             trackingActive = true
+            gpsMode = GpsMode.TRACKING
             if (pendingSearchAfterPermission) {
                 searchRequestId += 1
                 pendingSearchAfterPermission = false
@@ -153,12 +156,23 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
             requestLocationPermissions()
-        } else if (trackingActive) {
-            context.stopService(Intent(context, LocationTrackingService::class.java))
-            trackingActive = false
         } else {
-            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            trackingActive = true
+            when (gpsMode) {
+                GpsMode.STOPPED -> {
+                    ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                    gpsMode = GpsMode.TRACKING
+                    trackingActive = true
+                }
+                GpsMode.TRACKING -> {
+                    gpsMode = GpsMode.NAVIGATION
+                    trackingActive = false
+                }
+                GpsMode.NAVIGATION -> {
+                    context.stopService(Intent(context, LocationTrackingService::class.java))
+                    gpsMode = GpsMode.STOPPED
+                    trackingActive = false
+                }
+            }
         }
     }
     CompositionLocalProvider(LocalLayoutDirection provides if (english) androidx.compose.ui.unit.LayoutDirection.Ltr else androidx.compose.ui.unit.LayoutDirection.Rtl) {
@@ -167,7 +181,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, onClusterSelected = { selectedCluster = it })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, perspective3D, searchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, onClusterSelected = { selectedCluster = it })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -187,6 +201,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
                             requestLocationPermissions()
+                        } else if (command == DriverCommand.StartSearch && gpsMode == GpsMode.STOPPED) {
+                            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                            gpsMode = GpsMode.TRACKING
+                            trackingActive = true
                         }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
                         if (transition.accepted) {
@@ -275,7 +293,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, onClusterSelected: (RestaurantCluster) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, perspective3D: Boolean, searchRequestId: Int, searchActive: Boolean, onClusterSelected: (RestaurantCluster) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -284,7 +302,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
-    var navigationActive by remember { mutableStateOf(false) }
+    var navigationActive by remember(gpsMode) { mutableStateOf(gpsMode == GpsMode.NAVIGATION) }
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
@@ -371,28 +389,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
                     if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
-                    val existing = userMarker
-                    if (existing == null) {
-                        userMarker = map.addMarker(MarkerOptions().position(point).title("موقع المندوب"))
-                    } else {
-                        // Interpolate between GPS fixes so the position marker glides instead of jumping.
-                        markerAnimationJob?.cancel()
-                        val start = existing.position
-                        val startedAt = SystemClock.uptimeMillis()
-                        val durationMs = 700L
-                        markerAnimationJob = scope.launch {
-                            while (isActive) {
-                                val fraction = ((SystemClock.uptimeMillis() - startedAt).toFloat() / durationMs).coerceIn(0f, 1f)
-                                val eased = fraction * fraction * (3f - 2f * fraction)
-                                existing.position = LatLng(
-                                    start.latitude + (point.latitude - start.latitude) * eased,
-                                    start.longitude + (point.longitude - start.longitude) * eased
-                                )
-                                if (fraction >= 1f) break
-                                delay(16L)
-                            }
-                        }
-                    }
+                    // The driver symbol is rendered as a single centered overlay (car in tracking,
+                    // direction arrow in navigation), so the map never shows a pin and arrow together.
+                    userMarker?.let { map.removeMarker(it); userMarker = null }
                     val previousCameraLocation = lastCameraLocation
                     val navigating = navigationActive && activeDestination != null
                     val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
@@ -649,14 +648,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
-        if (navigationActive && activeDestination != null) {
+        if (gpsMode == GpsMode.TRACKING || gpsMode == GpsMode.NAVIGATION) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).offset(y = 100.dp).size(36.dp),
-                color = Panel.copy(alpha = .94f),
+                modifier = Modifier.align(Alignment.Center).offset(y = if (gpsMode == GpsMode.NAVIGATION) 100.dp else 0.dp).size(42.dp),
+                color = Panel.copy(alpha = .96f),
                 shape = CircleShape
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(24.dp).rotate(currentBearing))
+                    Icon(
+                        if (gpsMode == GpsMode.TRACKING) Icons.Rounded.DirectionsCar else Icons.Rounded.Navigation,
+                        null,
+                        tint = Mint,
+                        modifier = Modifier.size(26.dp).rotate(currentBearing)
+                    )
                 }
             }
         }
