@@ -29,8 +29,10 @@ class LocationTrackingService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            try { locationManager.removeUpdates(this) } catch (_: Exception) { }
             setTrackingState(false)
-            stopSelf()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
             return START_NOT_STICKY
         }
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -42,6 +44,8 @@ class LocationTrackingService : Service(), LocationListener {
         }
         startForeground(NOTIFICATION_ID, buildNotification("Waiting for location"))
         try {
+            // Repeated START commands must not accumulate duplicate provider subscriptions.
+            locationManager.removeUpdates(this)
             var requested = false
             for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                 if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
