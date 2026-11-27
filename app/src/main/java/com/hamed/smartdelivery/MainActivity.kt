@@ -530,7 +530,7 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
-        Text("HAMED SMART DELIVERY • 0.2.0", color = Muted, fontSize = 10.sp)
+        Text("HAMED SMART DELIVERY • 0.4.3", color = Muted, fontSize = 10.sp)
     }
 }
 
