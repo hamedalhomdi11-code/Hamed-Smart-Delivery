@@ -385,7 +385,15 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    if (!mapExpanded) Dashboard(driverSnapshot, english, waitRemainingSeconds, onManualSwitch = { selectedCluster?.let { cluster -> excludedClusters = excludedClusters + (clusterStableId(cluster) to (System.currentTimeMillis() + 10 * 60 * 1000L)); selectedCluster = null; clusterWaitStartedAt = null; manualSwitchRequestId += 1; searchRequestId += 1 } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
+                    if (!mapExpanded) Dashboard(driverSnapshot, english, waitRemainingSeconds, onManualSwitch = { selectedCluster?.let { cluster ->
+                        val now = System.currentTimeMillis()
+                        val exclusion = com.hamed.smartdelivery.domain.ClusterPolicy.manualSwitch(clusterStableId(cluster), now)
+                        excludedClusters = excludedClusters + (exclusion.clusterId to exclusion.untilEpochMillis)
+                        selectedCluster = null
+                        clusterWaitStartedAt = null
+                        manualSwitchRequestId += 1
+                        searchRequestId += 1
+                    } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
                             requestLocationPermissions()
@@ -607,7 +615,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             val enteredAt = clusterEnteredAt
                             if (enteredAt != null && now - enteredAt >= 5 * 60 * 1000L) {
                                 autoSwitchTriggered = true
-                                onAutoExclude(clusterStableId(clusterAtLocation), now + 15 * 60 * 1000L)
+                                onAutoExclude(clusterStableId(clusterAtLocation), ClusterPolicy.automaticTimeout(clusterStableId(clusterAtLocation), now).untilEpochMillis)
                             }
                         }
                     }
