@@ -302,7 +302,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
-    var navigationActive by remember(gpsMode) { mutableStateOf(gpsMode == GpsMode.NAVIGATION) }
+    val navigationActive = gpsMode == GpsMode.NAVIGATION
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
@@ -412,7 +412,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         lastProcessedSearch = searchRequestId
                         val requestId = searchRequestId
                         routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
-                        navigationActive = false
                         routeJob?.cancel()
                         displayedRoutePolyline?.let { map.removePolyline(it) }
                         displayedRoutePolyline = null
@@ -678,45 +677,14 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             }
         }
         if (activeDestination != null && routePoints.size > 1) {
-            Row(
+            OutlinedButton(
+                onClick = { showMapProviderDialog = true },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 54.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
             ) {
-                Button(
-                    onClick = {
-                        navigationActive = true
-                        val instruction = nextTurnInstruction.ifBlank { "ابدأ السير إلى الوجهة" }
-                        if (ttsReady) speech.speak(instruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-navigation-start")
-                        routeStatus = "الملاحة داخل التطبيق تعمل"
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Night)
-                ) {
-                    Icon(Icons.Rounded.Navigation, null)
-                    Spacer(Modifier.width(5.dp))
-                    Text(if (navigationActive) "الملاحة تعمل" else "ابدأ الملاحة")
-                }
-                if (navigationActive) {
-                    OutlinedButton(
-                        onClick = {
-                            navigationActive = false
-                            speech.stop()
-                            routeStatus = "تم إيقاف الملاحة • المسار ما زال ظاهراً"
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Rounded.Stop, null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("إيقاف الملاحة")
-                    }
-                }
-                OutlinedButton(
-                    onClick = { showMapProviderDialog = true },
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                ) {
-                    Icon(Icons.Rounded.Map, null)
-                    Spacer(Modifier.width(5.dp))
-                    Text("تبديل تطبيق الخريطة")
-                }
+                Icon(Icons.Rounded.Map, null)
+                Spacer(Modifier.width(5.dp))
+                Text("تبديل تطبيق الخريطة")
             }
         }
         if (showMapProviderDialog && activeDestination != null) {
