@@ -200,6 +200,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val gpsPrefs = remember { context.getSharedPreferences(LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE) }
     var announcementsEnabled by remember { mutableStateOf(workflowPrefs.getBoolean("announcements_enabled", true)) }
     var announcementVolume by remember { mutableFloatStateOf(workflowPrefs.getFloat("announcement_volume", 0.85f).coerceIn(0f, 1f)) }
+    var taskReminderIntervalMinutes by remember { mutableIntStateOf(workflowPrefs.getInt("task_reminder_interval_minutes", 3).coerceIn(1, 10)) }
     var speechReady by remember { mutableStateOf(false) }
     val announcementsSpeech = remember(context) { TextToSpeech(context) { status -> speechReady = status == TextToSpeech.SUCCESS } }
     LaunchedEffect(speechReady) { if (speechReady) announcementsSpeech.language = Locale("ar", "SA") }
@@ -271,7 +272,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     LaunchedEffect(driverSnapshot.mode) {
         if (driverSnapshot.mode != previousDriverMode) {
             when (driverSnapshot.mode) {
-                DriverMode.SEARCHING -> announceArabic("بدأ البحث عن الطلبات")
+                DriverMode.SEARCHING -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("مبروك إتمام المهمة بنجاح. حان الوقت للبحث عن الطلبات، جاري البحث") else announceArabic("حامد سمارت دليفري يتمنى لكم يوماً مليئاً بالأرباح والطلبات. حان الوقت للبحث عن الطلبات، جاري البحث")
                 DriverMode.ORDER_RECEIVED -> announceArabic("تم استلام الطلب. توقف البحث مؤقتاً")
                 DriverMode.IDLE -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("اكتملت المهمة. يمكنك بدء البحث عن طلب جديد")
                 DriverMode.SAFE_MODE -> announceArabic("تم تفعيل وضع الأمان")
@@ -293,10 +294,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
             announceArabic("بدأ مؤقت انتظار التجمع لمدة خمس دقائق")
     }
-    LaunchedEffect(driverSnapshot.mode, announcementsEnabled) {
+    LaunchedEffect(driverSnapshot.mode, announcementsEnabled, taskReminderIntervalMinutes) {
         if (driverSnapshot.mode == DriverMode.ORDER_RECEIVED && announcementsEnabled) {
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                delay(150_000L)
+                delay(taskReminderIntervalMinutes * 60_000L)
                 if (driverSnapshot.mode == DriverMode.ORDER_RECEIVED && announcementsEnabled) {
                     announceArabic("هل انتهيت من توصيل طلبك؟ إذا انتهيت، يرجى الضغط على زر انتهاء المهمة")
                 }
@@ -479,7 +480,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         when (selected) {
                             1 -> OrdersScreen(driverSnapshot, english)
                             2 -> PlacesScreen(english)
-                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() }, announcementsEnabled, { enabled -> announcementsEnabled = enabled; workflowPrefs.edit().putBoolean("announcements_enabled", enabled).apply() }, announcementVolume, { value -> announcementVolume = value.coerceIn(0f, 1f); workflowPrefs.edit().putFloat("announcement_volume", announcementVolume).apply() }, { announceArabic("هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري") })
+                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() }, announcementsEnabled, { enabled -> announcementsEnabled = enabled; workflowPrefs.edit().putBoolean("announcements_enabled", enabled).apply() }, announcementVolume, { value -> announcementVolume = value.coerceIn(0f, 1f); workflowPrefs.edit().putFloat("announcement_volume", announcementVolume).apply() }, taskReminderIntervalMinutes, { value -> taskReminderIntervalMinutes = value.coerceIn(1, 10); workflowPrefs.edit().putInt("task_reminder_interval_minutes", taskReminderIntervalMinutes).apply() }, { announceArabic("هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري") })
                         }
                     }
                 }
@@ -810,7 +811,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     }
                     val currentRoute = routePoints
 
-                    if (activeDestination != null && currentRoute.size > 1) {
+                    if (searchActive && activeDestination != null && currentRoute.size > 1) {
                         val nearestDistance = currentRoute.minOf { routePoint ->
                             val result = FloatArray(1)
                             Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
@@ -1037,7 +1038,7 @@ private fun PlacesScreen(english: Boolean) {
 }
 
 @Composable
-private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit, announcementsEnabled: Boolean, onAnnouncementsChange: (Boolean) -> Unit, announcementVolume: Float, onAnnouncementVolumeChange: (Float) -> Unit, onTestAnnouncement: () -> Unit) {
+private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit, announcementsEnabled: Boolean, onAnnouncementsChange: (Boolean) -> Unit, announcementVolume: Float, onAnnouncementVolumeChange: (Float) -> Unit, taskReminderIntervalMinutes: Int, onTaskReminderIntervalChange: (Int) -> Unit, onTestAnnouncement: () -> Unit) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(if (english) "PROFILE & SETTINGS" else "حسابي والإعدادات", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleLanguage() }) {
@@ -1088,6 +1089,8 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 }
                 Text(if (english) "Announcement volume" else "مستوى صوت التعليمات", color = Color.White, fontSize = 12.sp)
                 Slider(value = announcementVolume, onValueChange = onAnnouncementVolumeChange, enabled = announcementsEnabled)
+                Text(if (english) "Task reminder interval: $taskReminderIntervalMinutes min" else "تذكير إكمال المهمة كل $taskReminderIntervalMinutes دقائق", color = Color.White, fontSize = 12.sp)
+                Slider(value = taskReminderIntervalMinutes.toFloat(), onValueChange = { onTaskReminderIntervalChange(it.roundToInt()) }, valueRange = 1f..10f, steps = 8, enabled = announcementsEnabled)
                 OutlinedButton(onClick = onTestAnnouncement, enabled = announcementsEnabled, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.VolumeUp, null)
                     Spacer(Modifier.width(7.dp))
