@@ -45,8 +45,12 @@ class LocationTrackingService : Service(), LocationListener {
             var requested = false
             for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                 if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
-                    locationManager.requestLocationUpdates(provider, 2500L, 3f, this, Looper.getMainLooper())
-                    requested = true
+                    try {
+                        locationManager.requestLocationUpdates(provider, 2500L, 3f, this, Looper.getMainLooper())
+                        requested = true
+                    } catch (_: SecurityException) {
+                        // Keep trying other providers; coarse-only permission may not allow GPS_PROVIDER.
+                    }
                 }
             }
             if (!requested) {
