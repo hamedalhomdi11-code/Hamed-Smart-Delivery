@@ -144,8 +144,14 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
     var perspective3D by remember { mutableStateOf(true) }
     var english by remember { mutableStateOf(false) }
-    var selected by remember { mutableIntStateOf(0) }
+    val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
+    var selected by remember { mutableIntStateOf(uiStatePrefs.getInt("selected_tab", 0).coerceIn(0, 3)) }
     var mapExpanded by remember { mutableStateOf(false) }
+
+    // Keep the last top-level page across process restarts without persisting live location data.
+    LaunchedEffect(selected) {
+        uiStatePrefs.edit().putInt("selected_tab", selected).apply()
+    }
     var searchRequestId by remember { mutableIntStateOf(0) }
     var manualSwitchRequestId by remember { mutableIntStateOf(0) }
     var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
