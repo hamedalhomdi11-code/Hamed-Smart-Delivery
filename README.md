@@ -18,7 +18,7 @@
 - Map renderer: MapLibre Native Android (OpenGL renderer).
 - Style/tiles: OpenFreeMap Liberty style, with map attribution enabled and a visible OSM credit.
 - Camera: 50-degree tilt to provide a perspective navigation view.
-- Location: explicit foreground/coarse/fine permission flow and a user-started foreground GPS service with an ongoing notification.
+- Location: explicit foreground/coarse/fine permission flow and a user-started foreground GPS service with an ongoing notification. The service publishes live coordinate fixes to the map UI, tracks both GPS and network providers when available, and persists the active-session flag across activity recreation.
 - Shared destination import: coordinates and common full Google Maps coordinate links.
 - Route preview: OSRM public demo endpoint. It is best-effort for development and is not a production SLA; service availability, routing coverage and usage limits are external.
 
@@ -30,7 +30,7 @@ GitHub Actions workflow: `.github/workflows/android-ci.yml`. It runs unit tests,
 ## App identity
 - Display name: Hamed Smart Delivery
 - Package: `com.hamed.smartdelivery`
-- Current development version: `0.2.0`
+- Current development version: `0.4.3` (versionCode `43`)
 
 ## Repository map
 See [SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md), [ROADMAP.md](docs/ROADMAP.md), [ACCEPTED_REQUIREMENTS.md](docs/ACCEPTED_REQUIREMENTS.md), and [INTEGRATIONS.md](docs/INTEGRATIONS.md).
