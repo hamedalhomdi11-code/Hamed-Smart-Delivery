@@ -212,21 +212,14 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (!hasLocationPermission) {
             requestLocationPermissions()
         } else {
-            when (gpsMode) {
-                GpsMode.STOPPED -> {
-                    ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-                    gpsMode = GpsMode.TRACKING
-                    trackingActive = true
-                }
-                GpsMode.TRACKING -> {
-                    gpsMode = GpsMode.NAVIGATION
-                    trackingActive = false
-                }
-                GpsMode.NAVIGATION -> {
-                    context.stopService(Intent(context, LocationTrackingService::class.java))
-                    gpsMode = GpsMode.STOPPED
-                    trackingActive = false
-                }
+            if (gpsMode == GpsMode.STOPPED) {
+                ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                gpsMode = GpsMode.TRACKING
+                trackingActive = true
+            } else {
+                context.stopService(Intent(context, LocationTrackingService::class.java))
+                gpsMode = GpsMode.STOPPED
+                trackingActive = false
             }
         }
     }
@@ -755,9 +748,9 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
-        if (gpsMode == GpsMode.TRACKING || gpsMode == GpsMode.NAVIGATION) {
+        if (gpsMode == GpsMode.TRACKING) {
             Surface(
-                modifier = Modifier.align(Alignment.Center).offset(y = if (gpsMode == GpsMode.NAVIGATION) 100.dp else 0.dp).size(42.dp),
+                modifier = Modifier.align(Alignment.Center).size(42.dp),
                 color = Panel.copy(alpha = .96f),
                 shape = CircleShape
             ) {
