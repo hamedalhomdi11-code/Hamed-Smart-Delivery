@@ -3,7 +3,7 @@
 Status: accepted scope for implementation; not a claim of completed functionality.
 
 ## Architecture 1 — behavior
-- GPS control is one four-step cycle: tracking with a car marker; navigation with a direction arrow; stop; return to tracking. Tracking and navigation presentation must never be active together.
+- GPS control has two states only: live tracking and stopped. There is no independent navigation mode. Live tracking uses one arrow marker anchored to the user's actual geographic coordinates; no car icon and no fixed screen-center overlay.
 - Search workflow has exactly three user actions: Find orders; I got an order from this cluster; Delivery task completed. On order received, stop automatic cluster search and all waiting/switch timers. On completion, restart search automatically.
 - Rank restaurant clusters using distance, restaurant density/activity, observed order history, freshness, and available signals. Do not claim guaranteed demand.
 - Start the five-minute wait only after the driver enters the selected cluster's geographic radius.
@@ -17,11 +17,11 @@ Status: accepted scope for implementation; not a claim of completed functionalit
 
 ## Architecture 2 — presentation
 - The map occupies the dominant portion of the driving screen; controls are compact floating controls and must not split the screen into equal map/control panels.
-- Tracking uses a smoothly moving car marker. Navigation uses a smoothly moving direction arrow; never show both markers simultaneously.
-- Route line has sequential, gently animated directional arrows.
+- Tracking uses a smoothly moving geographic arrow marker. It updates from live GPS coordinates and bearing, and moves with map content when the user pans the map.
+- A neutral route preview may be displayed to a selected cluster. It must not display turn-by-turn instructions or present itself as a separate navigation mode.
 - Route segments use blue for open traffic, orange for moderate/light congestion, and red for severe congestion. Only show traffic colors when a real traffic source is available; otherwise show a neutral route rather than fabricated traffic.
-- Recalculate the route when the driver deviates or a better route/traffic change is confirmed; transition smoothly to the new route and keep directional arrows moving.
-- When route changes, play a clear audible alert and synchronized vibration in both tracking and navigation modes. Provide controls for sound/vibration preferences.
+- Recalculate the route preview when a material deviation is detected; use a neutral line unless a reliable live traffic source is available. Do not fabricate traffic colors.
+- When the route preview changes during tracking, play a clear audible alert and synchronized vibration. Provide independent sound/vibration preferences.
 - Motion and graphics must remain smooth and avoid unnecessary battery/performance cost.
 - No traffic-color legend/buttons are required.
 
