@@ -2,7 +2,7 @@
 
 **حامد سمارت دليفري** — Android-first smart courier navigation and dispatch assistant.
 
-> Current development status: the original driver-first Arabic/English interface is retained. The map uses MapLibre Native with an OpenFreeMap style and a 50-degree tilted camera. The app requests foreground location permission, starts an explicit user-controlled Android location foreground service, accepts shared coordinate links from other apps, and draws OSRM driving routes with maneuver steps, Arabic text-to-speech prompts, and best-effort off-route recalculation for imported destinations. Version 0.3.0 is still a development candidate, not a production-ready final release: automatic restaurant-cluster discovery and routing, delivery-stage destination handoff, persistent trip/restaurant storage, production routing service, optional remote-control backend, device QA and protected release signing remain.
+> Current development status: the original driver-first Arabic/English interface is retained. The map uses MapLibre Native with an OpenFreeMap style and a 50-degree tilted camera. The app requests location permission at startup, starts a foreground location service, streams live GPS/network fixes, and displays the user's position as a geographic arrow marker anchored to map coordinates. The map remains in tracking-only mode; there is no independent turn-by-turn navigation mode. A neutral OSRM route preview may be shown for selected restaurant clusters. Version 0.3.0 is still a development candidate, not a production-ready final release: automatic restaurant-cluster discovery and routing, delivery-stage destination handoff, persistent trip/restaurant storage, production routing service, optional remote-control backend, device QA and protected release signing remain.
 
 ## Product principles
 - Arabic-first with English toggle; RTL/LTR layout.
@@ -18,9 +18,9 @@
 - Map renderer: MapLibre Native Android (OpenGL renderer).
 - Style/tiles: OpenFreeMap Liberty style, with map attribution enabled and a visible OSM credit.
 - Camera: 50-degree tilt to provide a perspective navigation view.
-- Location: explicit foreground/coarse/fine permission flow and a user-started foreground GPS service with an ongoing notification.
+- Location: runtime fine/coarse location permission request, foreground location service with ongoing notification, GPS + network provider updates, and no raw-coordinate persistence.
 - Shared destination import: coordinates and common full Google Maps coordinate links.
-- Route guidance: OSRM public demo endpoint with maneuver steps and location-based spoken instruction progression. Off-route detection uses an 85 m threshold and a 20 s reroute cooldown. This is best-effort development routing, not a production SLA; service availability, routing coverage and usage limits are external.
+- Route preview: OSRM public demo endpoint with best-effort recalculation after deviation. It is not turn-by-turn navigation and is not a production SLA; service availability, routing coverage and usage limits are external.
 - Imported destination only: a shared coordinate link can start navigation. Automatic restaurant-cluster selection and wiring each manual delivery stage to a destination are not implemented yet.
 
 ## Build
@@ -31,7 +31,7 @@ GitHub Actions workflow: `.github/workflows/android-ci.yml`. It runs unit tests,
 ## App identity
 - Display name: Hamed Smart Delivery
 - Package: `com.hamed.smartdelivery`
-- Current development candidate: `0.3.0` (versionCode 3)
+- Current development candidate: `0.4.3` (versionCode 7)
 
 ## Repository map
 See [SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md), [ROADMAP.md](docs/ROADMAP.md), [ACCEPTED_REQUIREMENTS.md](docs/ACCEPTED_REQUIREMENTS.md), and [INTEGRATIONS.md](docs/INTEGRATIONS.md).
