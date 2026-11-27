@@ -191,8 +191,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     val workflowPrefs = remember { context.getSharedPreferences("workflow_state", Context.MODE_PRIVATE) }
     val restoredDriverMode = remember {
-        runCatching { DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!) }
-            .getOrDefault(DriverMode.IDLE)
+        val savedMode = runCatching {
+            DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!)
+        }.getOrDefault(DriverMode.IDLE)
+        // A previously active search cannot be resumed without a verified location session.
+        if (savedMode == DriverMode.SEARCHING) DriverMode.IDLE else savedMode
     }
     var driverSnapshot by remember {
         mutableStateOf(DriverSnapshot(restoredDriverMode, workflowPrefs.getString("last_command_id", null)))
@@ -217,7 +220,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var visitedClusterIds by remember { mutableStateOf(clusterPrefs.getString("visited_ids", "").orEmpty().split('|').filter { it.isNotBlank() }) }
     var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var clusterWaitStartedAt by remember {
-        mutableStateOf(workflowPrefs.getLong("cluster_wait_started_at", -1L).takeIf { it > 0L })
+        mutableStateOf(
+            if (restoredDriverMode == DriverMode.SEARCHING)
+                workflowPrefs.getLong("cluster_wait_started_at", -1L).takeIf { it > 0L }
+            else null
+        )
     }
     var waitRemainingSeconds by remember { mutableIntStateOf(0) }
 
