@@ -614,6 +614,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var routeJob: Job? = null
             var markerAnimationJob: Job? = null
             var positionAnimationJob: Job? = null
+            var pulseAnimationJob: Job? = null
             var displayedMarkerLocation: LatLng? = null
             var displayedArrowBearing = 0f
             val restaurantMarkers = linkedMapOf<String, Marker>()
@@ -692,6 +693,17 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     lastArrowBearing = targetArrowBearing
+                    if (pulseAnimationJob == null) {
+                        pulseAnimationJob = scope.launch {
+                            while (isActive) {
+                                if (positionAnimationJob?.isActive != true && userMarker != null) {
+                                    val pulse = ((kotlin.math.sin(SystemClock.elapsedRealtime() / 650.0).toFloat() + 1f) / 2f)
+                                    userMarker?.icon = createLocationArrowIcon(context, displayedArrowBearing, pulse)
+                                }
+                                delay(120L)
+                            }
+                        }
+                    }
                     val previousCameraLocation = lastCameraLocation
                     val shouldFollow = followUserCamera && (firstFix || (latestTrackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f)))
                     if (shouldFollow) {
@@ -797,7 +809,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 displayedRoutePolyline = null
                                                     displayedRoutePolyline = map.addPolyline(
                                                         PolylineOptions().addAll(route.points)
-                                                            .color(AndroidColor.rgb(94, 240, 194)).width(6f)
+                                                            .color(AndroidColor.rgb(166, 187, 205)).width(6f)
                                                     )
                                                     routePoints = route.points
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
@@ -930,6 +942,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 routeJob?.cancel()
                 markerAnimationJob?.cancel()
                 positionAnimationJob?.cancel()
+                pulseAnimationJob?.cancel()
                 restaurantMarkers.values.forEach { map.removeMarker(it) }
                 restaurantMarkers.clear()
                 pharmacyMarkers.values.forEach { map.removeMarker(it) }
