@@ -15,7 +15,7 @@ import android.location.LocationManager
 import android.graphics.Color as AndroidColor
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Matrix
+import android.graphics.Paint
 import android.os.Looper
 import android.os.SystemClock
 import android.os.Build
@@ -627,6 +627,18 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     lastArrowBearing = arrowBearing
+                    if (markerAnimationJob == null) {
+                        markerAnimationJob = scope.launch {
+                            var pulse = 0f
+                            while (isActive) {
+                                userMarker?.let { marker ->
+                                    if (!lastArrowBearing.isNaN()) marker.icon = createLocationArrowIcon(context, lastArrowBearing, pulse)
+                                }
+                                pulse = (pulse + 0.2f) % 1f
+                                delay(1100L)
+                            }
+                        }
+                    }
                     val previousCameraLocation = lastCameraLocation
                     val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
                     if (shouldFollow) {
@@ -885,14 +897,22 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     }
 }
 
-private fun createLocationArrowIcon(context: Context, bearing: Float): org.maplibre.android.annotations.Icon {
+private fun createLocationArrowIcon(context: Context, bearing: Float, pulse: Float = 0f): org.maplibre.android.annotations.Icon {
     val drawable = ContextCompat.getDrawable(context, R.drawable.ic_location_arrow)
         ?: error("Location arrow drawable is missing")
     val bitmap = Bitmap.createBitmap(72, 72, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, 72, 72)
+    val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.argb((110 * (1f - pulse)).toInt().coerceIn(0, 110), 94, 240, 194)
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+    }
+    canvas.drawCircle(36f, 36f, 20f + pulse * 8f, glowPaint)
+    canvas.save()
     canvas.rotate(bearing, 36f, 36f)
     drawable.draw(canvas)
+    canvas.restore()
     return IconFactory.getInstance(context).fromBitmap(bitmap)
 }
 
