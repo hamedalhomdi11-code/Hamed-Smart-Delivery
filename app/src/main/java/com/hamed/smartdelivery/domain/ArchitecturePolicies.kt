@@ -46,12 +46,8 @@ object ClusterPolicy {
     fun leave(wait: ClusterWaitState): ClusterWaitState =
         wait.copy(enteredAtEpochMillis = null, pausedAtEpochMillis = null)
 
-    /** Manual switching is eligible only after ten minutes at the current cluster. */
-    fun canManualSwitch(wait: ClusterWaitState, now: Long): Boolean {
-        val start = wait.enteredAtEpochMillis ?: return false
-        if (wait.pausedAtEpochMillis != null || now < start) return false
-        return now - start >= MANUAL_EXCLUSION_MILLIS
-    }
+    /** Manual switching is always allowed while a cluster is selected, regardless of arrival or wait time. */
+    fun canManualSwitch(wait: ClusterWaitState, now: Long): Boolean = true
 
     fun manualSwitch(clusterId: String, now: Long) = ClusterExclusion(clusterId, now + MANUAL_EXCLUSION_MILLIS)
     fun automaticTimeout(clusterId: String, now: Long) = ClusterExclusion(clusterId, now + AUTO_EXCLUSION_MILLIS)
