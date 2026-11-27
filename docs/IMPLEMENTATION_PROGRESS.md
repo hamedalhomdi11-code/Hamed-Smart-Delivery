@@ -70,3 +70,4 @@ Verification status for this recovery patch:
 - The Render image build now refuses to publish unless the 0.4.3 APK exists, contains the bundled Riyadh SQLite asset, reports versionName 0.4.3, and passes apksigner verification; it publishes APK SHA-256 and certificate details for inspection.
 - The geographic arrow now has a lightweight pulse/glow animation (paused during position interpolation to avoid icon-update contention); route previews use a neutral line color rather than implying live traffic conditions.
 - Cluster retries now use the latest GPS fix rather than reusing the first callback's coordinates; cached location is used only when it is no older than two minutes, preventing a stale last-known position from pinning discovery to the wrong part of the map.
+- Android package versionCode is incremented from 7 to 8 while versionName remains 0.4.3, so this recovery APK is a forward update rather than a same-code rebuild.
