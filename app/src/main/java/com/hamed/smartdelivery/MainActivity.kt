@@ -5,6 +5,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.location.Location
@@ -221,6 +223,19 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
     var trackingActive by remember { mutableStateOf(gpsPrefs.getBoolean(LocationTrackingService.KEY_ACTIVE, false)) }
     var gpsMode by remember { mutableStateOf(if (trackingActive) GpsMode.TRACKING else GpsMode.STOPPED) }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == LocationTrackingService.ACTION_TRACKING_STATE) {
+                    val active = intent.getBooleanExtra(LocationTrackingService.EXTRA_TRACKING_ACTIVE, false)
+                    trackingActive = active
+                    gpsMode = if (active) GpsMode.TRACKING else GpsMode.STOPPED
+                }
+            }
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(LocationTrackingService.ACTION_TRACKING_STATE), ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     var perspective3D by remember { mutableStateOf(workflowPrefs.getBoolean("perspective_3d", true)) }
     var english by remember { mutableStateOf(workflowPrefs.getBoolean("english", false))}
     val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
