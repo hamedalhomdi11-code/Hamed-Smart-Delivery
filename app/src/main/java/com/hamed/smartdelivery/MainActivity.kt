@@ -331,8 +331,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            trackingActive = true
-            gpsMode = GpsMode.TRACKING
             if (pendingSearchAfterPermission) {
                 val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.StartSearch)
                 if (transition.accepted) {
@@ -357,8 +355,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             requestLocationPermissions()
         } else {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            trackingActive = true
-            gpsMode = GpsMode.TRACKING
         }
     }
     LaunchedEffect(Unit) {
@@ -387,12 +383,9 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         } else {
             if (gpsMode == GpsMode.STOPPED) {
                 ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-                gpsMode = GpsMode.TRACKING
-                trackingActive = true
             } else {
-                context.stopService(Intent(context, LocationTrackingService::class.java))
-                gpsMode = GpsMode.STOPPED
-                trackingActive = false
+                // Send the service's explicit STOP command; do not bypass its state/notification cleanup.
+                context.startService(Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_STOP))
             }
         }
     }
@@ -433,8 +426,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             requestLocationPermissions()
                         } else if (command == DriverCommand.StartSearch && gpsMode == GpsMode.STOPPED) {
                             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-                            gpsMode = GpsMode.TRACKING
-                            trackingActive = true
                         }
                         val transition = DriverReducer.reduce(driverSnapshot, command)
                         if (transition.accepted) {
@@ -600,7 +591,13 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, searchActive, excludedClusters, visitedClusterIds, orderProducingClusterIds) {
+    val latestExcludedClusters by rememberUpdatedState(excludedClusters)
+    val latestVisitedClusterIds by rememberUpdatedState(visitedClusterIds)
+    val latestOrderProducingClusterIds by rememberUpdatedState(orderProducingClusterIds)
+    val latestClusterWaitStartedAt by rememberUpdatedState(clusterWaitStartedAt)
+    val latestSelectedClusterId by rememberUpdatedState(selectedClusterId)
+
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, searchActive) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission || gpsMode == GpsMode.STOPPED) {
             onDispose { }
@@ -729,7 +726,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
                                         context, location.latitude, location.longitude
                                     ) { updatedClusters ->
-                                        if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming
+                                        if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming false
                                         updatedClusters.take(8).forEach { cluster ->
                                             val markerKey = "${(cluster.latitude * 100000).roundToInt()}:${(cluster.longitude * 100000).roundToInt()}"
                                             val markerPosition = LatLng(cluster.latitude, cluster.longitude)
@@ -745,24 +742,24 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         }
                                         val now = System.currentTimeMillis()
                                         val availableClusters = updatedClusters.filter { cluster ->
-                                            val excludedUntil = excludedClusters[clusterStableId(cluster)]
+                                            val excludedUntil = latestExcludedClusters[clusterStableId(cluster)]
                                             excludedUntil == null || excludedUntil <= now
                                         }
                                         // Prefer a fresh/known productive cluster, but never stop discovery
                                         // merely because the repeat-visit preference rejects every candidate.
                                         val best = availableClusters.firstOrNull { cluster ->
                                             val id = clusterStableId(cluster)
-                                            val lastVisit = visitedClusterIds.indexOfLast { it == id }
-                                            val otherVisits = if (lastVisit < 0) 4 else visitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
-                                            lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
+                                            val lastVisit = latestVisitedClusterIds.indexOfLast { it == id }
+                                            val otherVisits = if (lastVisit < 0) 4 else latestVisitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
+                                            lastVisit < 0 || otherVisits >= 4 || id in latestOrderProducingClusterIds
                                         } ?: availableClusters.firstOrNull() ?: run {
                                             routeStatus = "التجمعات القريبة مستبعدة مؤقتاً • مستمر في البحث عن تجمع آخر"
-                                            return@findNearestClustersStreaming
+                                            return@findNearestClustersStreaming false
                                         }
                                         foundEligibleCluster = true
                                         if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
                                             currentCluster = best
-                                            clusterEnteredAt = if (clusterStableId(best) == selectedClusterId) clusterWaitStartedAt else null
+                                            clusterEnteredAt = if (clusterStableId(best) == latestSelectedClusterId) latestClusterWaitStartedAt else null
                                             autoSwitchTriggered = false
                                         }
                                         onClusterSelected(best)
@@ -806,6 +803,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         } else {
                                             routeStatus = "تم تحديث نتائج مصادر المطاعم • أفضل تجمع: ${best.restaurantCount} مطعم"
                                         }
+                                        true
                                     }
                                     val nearbyPharmacies = withContext(Dispatchers.IO) {
                                         RiyadhPlacesDatabase.nearestPharmacies(
@@ -828,7 +826,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     if (foundEligibleCluster) break
                                     routeStatus = if (clusters.isNotEmpty())
                                         "لم يتوفر تجمع صالح بعد • مستمر في البحث عن تجمع آخر"
-                                    else "لم تصل نتائج بعد • مستمر في البحث"
+                                    else "لا توجد تجمعات قريبة في قاعدة الرياض حتى الآن • يجري توسيع نطاق البحث"
                                 } catch (error: Exception) {
                                     routeStatus = "تعذر مصدر مؤقتاً • مستمر في إعادة المحاولة"
                                 }
