@@ -64,9 +64,8 @@ class LocationTrackingService : Service(), LocationListener {
             if (!requested) {
                 android.util.Log.e(TAG, "No enabled GPS or network location provider")
                 setTrackingState(false)
+                // Do not recreate an ongoing notification after removing the foreground session.
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                manager.notify(NOTIFICATION_ID, buildNotification("Location is off. Enable GPS to start tracking."))
                 stopSelf()
                 return START_NOT_STICKY
             }
