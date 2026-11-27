@@ -4,6 +4,8 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
+data class OrderClusterStats(val orderCount: Int, val lastOrderAtEpochMs: Long)
+
 /** Independent order-origin store. It never opens or mutates the bundled Riyadh places DB. */
 class OrderClusterDatabase(context: Context) : SQLiteOpenHelper(
     context.applicationContext,
@@ -34,6 +36,19 @@ class OrderClusterDatabase(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+
+    fun orderStats(): Map<String, OrderClusterStats> {
+        val result = linkedMapOf<String, OrderClusterStats>()
+        readableDatabase.rawQuery(
+            "SELECT cluster_id, order_count, last_order_at_epoch_ms FROM order_cluster_totals WHERE order_count > 0",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result[cursor.getString(0)] = OrderClusterStats(cursor.getInt(1), cursor.getLong(2))
+            }
+        }
+        return result
+    }
 
     fun orderProducingClusterIds(): Set<String> {
         val ids = linkedSetOf<String>()
