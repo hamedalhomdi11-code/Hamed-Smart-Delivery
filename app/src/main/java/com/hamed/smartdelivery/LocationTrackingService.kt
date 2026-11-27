@@ -29,10 +29,13 @@ class LocationTrackingService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            try { locationManager.removeUpdates(this) } catch (_: Exception) { }
+            android.util.Log.i(TAG, "Explicit GPS stop command received")
+            try { locationManager.removeUpdates(this) } catch (error: Exception) {
+                android.util.Log.w(TAG, "Could not remove GPS updates cleanly", error)
+            }
             setTrackingState(false)
             stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf(startId)
+            stopSelf()
             return START_NOT_STICKY
         }
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -42,6 +45,7 @@ class LocationTrackingService : Service(), LocationListener {
             stopSelf()
             return START_NOT_STICKY
         }
+        android.util.Log.i(TAG, "Starting foreground GPS session")
         startForeground(NOTIFICATION_ID, buildNotification("Waiting for location"))
         try {
             // Repeated START commands must not accumulate duplicate provider subscriptions.
@@ -58,19 +62,25 @@ class LocationTrackingService : Service(), LocationListener {
                 }
             }
             if (!requested) {
+                android.util.Log.e(TAG, "No enabled GPS or network location provider")
                 setTrackingState(false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                 manager.notify(NOTIFICATION_ID, buildNotification("Location is off. Enable GPS to start tracking."))
                 stopSelf()
                 return START_NOT_STICKY
             }
             setTrackingState(true)
-        } catch (_: SecurityException) {
+        } catch (error: SecurityException) {
+            android.util.Log.e(TAG, "Location permission was revoked while starting GPS", error)
             setTrackingState(false)
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
-        } catch (_: IllegalArgumentException) {
+        } catch (error: IllegalArgumentException) {
+            android.util.Log.e(TAG, "No usable location provider", error)
             setTrackingState(false)
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -126,6 +136,7 @@ class LocationTrackingService : Service(), LocationListener {
             .build()
 
     companion object {
+        private const val TAG = "HamedGPS"
         const val ACTION_START = "com.hamed.smartdelivery.action.START_LOCATION"
         const val ACTION_STOP = "com.hamed.smartdelivery.action.STOP_LOCATION"
         const val ACTION_LOCATION_UPDATE = "com.hamed.smartdelivery.action.LOCATION_UPDATE"
