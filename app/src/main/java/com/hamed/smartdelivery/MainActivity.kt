@@ -419,7 +419,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -496,34 +496,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
 }
 
-private fun openGoogleMaps(context: Context, destination: DeliveryDestination) {
-    val navigationUri = Uri.parse("google.navigation:q=${destination.latitude},${destination.longitude}&mode=d")
-    val googleMapsIntent = Intent(Intent.ACTION_VIEW, navigationUri).setPackage("com.google.android.apps.maps")
-    try {
-        context.startActivity(googleMapsIntent)
-    } catch (_: ActivityNotFoundException) {
-        val webUri = Uri.parse(
-            "https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving"
-        )
-        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
-    }
-}
-
-private fun navigationLookAhead(latitude: Double, longitude: Double, bearingDegrees: Double, distanceMeters: Double): LatLng {
-    val earthRadius = 6371000.0
-    val angular = distanceMeters / earthRadius
-    val bearing = Math.toRadians(bearingDegrees)
-    val lat1 = Math.toRadians(latitude)
-    val lon1 = Math.toRadians(longitude)
-    val lat2 = kotlin.math.asin(kotlin.math.sin(lat1) * kotlin.math.cos(angular) +
-        kotlin.math.cos(lat1) * kotlin.math.sin(angular) * kotlin.math.cos(bearing))
-    val lon2 = lon1 + kotlin.math.atan2(
-        kotlin.math.sin(bearing) * kotlin.math.sin(angular) * kotlin.math.cos(lat1),
-        kotlin.math.cos(angular) - kotlin.math.sin(lat1) * kotlin.math.sin(lat2)
-    )
-    return LatLng(Math.toDegrees(lat2), Math.toDegrees(lon2))
-}
-
 @Composable
 private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(Color(0xFF0B1723)).padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -542,7 +514,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, searchActive: Boolean, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, searchActive: Boolean, clusterWaitStartedAt: Long?, selectedClusterId: String?, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -551,7 +523,6 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
-    val navigationActive = false
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
@@ -559,10 +530,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
     var currentStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
-    var showMapProviderDialog by remember { mutableStateOf(false) }
-    var mapProviderNotice by remember { mutableStateOf("") }
     var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
-    var clusterEnteredAt by remember { mutableStateOf<Long?>(null) }
+    var clusterEnteredAt by remember(clusterWaitStartedAt, selectedClusterId) { mutableStateOf(clusterWaitStartedAt) }
     var autoSwitchTriggered by remember { mutableStateOf(false) }
     var ttsReady by remember { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
@@ -684,16 +653,15 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         userMarker?.rotation = arrowBearing
                     }
                     val previousCameraLocation = lastCameraLocation
-                    val navigating = navigationActive && activeDestination != null
-                    val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
+                    val shouldFollow = firstFix || (trackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
                     if (shouldFollow) {
                         firstFix = false
                         val bearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing.toDouble() else map.cameraPosition.bearing
                         map.animateCamera(
                             CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(if (navigating) navigationLookAhead(location.latitude, location.longitude, bearing, 115.0) else point)
-                                    .zoom(if (navigating) 18.0 else 16.5)
-                                    .tilt(if (perspective3D || navigating) 58.0 else 0.0).bearing(bearing).build()
+                                CameraPosition.Builder().target(point)
+                                    .zoom(16.5)
+                                    .tilt(if (perspective3D) 58.0 else 0.0).bearing(bearing).build()
                             ),
                             850
                         )
@@ -753,7 +721,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         }
                                         if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
                                             currentCluster = best
-                                            clusterEnteredAt = null
+                                            clusterEnteredAt = if (clusterStableId(best) == selectedClusterId) clusterWaitStartedAt else null
                                             autoSwitchTriggered = false
                                         }
                                         onClusterSelected(best)
@@ -966,56 +934,10 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             update = { }
         )
 
-        if (nextTurnInstruction.isNotBlank()) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 70.dp, vertical = 12.dp),
-                color = Panel.copy(alpha = .96f),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(nextTurnInstruction, color = Color.White, fontSize = 12.sp, maxLines = 2)
-                }
-            }
-        }
-        if (activeDestination != null && routePoints.size > 1) {
-            OutlinedButton(
-                onClick = { showMapProviderDialog = true },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 54.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-            ) {
-                Icon(Icons.Rounded.Map, null)
-                Spacer(Modifier.width(5.dp))
-                Text("تبديل تطبيق الخريطة")
-            }
-        }
-        if (showMapProviderDialog && activeDestination != null) {
-            AlertDialog(
-                onDismissRequest = { showMapProviderDialog = false },
-                title = { Text("اختيار تطبيق الخريطة", color = Color.White) },
-                text = { Text("اختر طريقة عرض هذا المسار. يمكنك إبقاء الخريطة المحلية أو فتح الوجهة في Google Maps.", color = Muted) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showMapProviderDialog = false
-                        openGoogleMaps(context, activeDestination!!)
-                    }) { Text("فتح Google Maps", color = Mint) }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showMapProviderDialog = false
-                        mapProviderNotice = "الخريطة المحلية هي المحددة"
-                    }) { Text("الخريطة المحلية", color = Color.White) }
-                },
-                containerColor = Panel,
-                titleContentColor = Color.White
-            )
-        }
-        if (mapProviderNotice.isNotBlank()) {
-            Surface(modifier = Modifier.align(Alignment.BottomStart).padding(12.dp), color = Panel.copy(alpha = .96f), shape = RoundedCornerShape(12.dp)) {
-                Text(mapProviderNotice, color = Mint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-            }
-        }
+
+
+
+
         if (routeStatus.isNotBlank()) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
