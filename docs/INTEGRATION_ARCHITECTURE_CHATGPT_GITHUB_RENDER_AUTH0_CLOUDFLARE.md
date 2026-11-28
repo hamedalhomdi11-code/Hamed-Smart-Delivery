@@ -36,7 +36,7 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Public Client ID: rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
 - Android applicationId verified from app/build.gradle.kts: com.hamed.smartdelivery.
 - Auth0 API created by user: Hamed Smart Delivery API; Identifier/Audience: https://hamed-smart-delivery-api; Auth0 API ID: 6b0a4d86b566fe33a405f7c6.
-- User-provided API settings page shows maximum access-token lifetime 86400 seconds and implicit/hybrid lifetime 7200 seconds. The displayed page text does not establish which JWT signing algorithm is currently selected; verify that RS256 is selected before relying on it.
+- User-provided API settings page shows maximum access-token lifetime 86400 seconds and implicit/hybrid lifetime 7200 seconds. User explicitly confirmed that the API's JWT signing algorithm is set to RS256.
 - Callback/logout URLs and API permissions/RBAC policy are not yet configured or verified.
 - No client secret is needed in the Android native application; use Authorization Code + PKCE.
 ### Cloudflare
@@ -150,3 +150,11 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - The shared page text does not expose the currently selected JWT signing algorithm; RS256 selection remains to be verified in the dashboard.
 - No API secret or token was requested or recorded. No other API settings were changed by the assistant.
 - Next: verify RS256 selection, then review Auth0's current Android SDK guidance before setting callback/logout URLs for applicationId com.hamed.smartdelivery. Do not enable paid add-ons or change unrelated API settings.
+
+
+### 2026-11-28 — Auth0 API signing algorithm confirmed
+- User explicitly confirmed that JSON Web Token (JWT) Signing Algorithm is set to RS256 for Hamed Smart Delivery API.
+- Reviewed the current Auth0.Android SDK documentation: Native Android uses the Auth0 Android SDK with Universal Login; the documented callback/logout URI format is https://{AUTH0_DOMAIN}/android/{APPLICATION_ID}/callback when using the SDK's default https scheme. Auth0 recommends Android App Links where feasible.
+- Verified applicationId remains com.hamed.smartdelivery from the repository's app/build.gradle.kts inspection.
+- No callback/logout URLs or application code were changed yet. The exact URL will be added only after the SDK configuration convention is selected and matched to the app's manifest placeholders.
+- Next: inspect the current Android Gradle and manifest configuration on the dedicated project branch, then propose the exact Allowed Callback URLs and Allowed Logout URLs for user confirmation before editing Auth0 settings.
