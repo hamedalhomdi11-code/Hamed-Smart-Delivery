@@ -8,6 +8,7 @@ sealed interface DriverCommand {
     data object StopSearch : DriverCommand
     data object OrderReceived : DriverCommand
     data object CompleteDelivery : DriverCommand
+    data object EndWork : DriverCommand
     data object EnterSafeMode : DriverCommand
     data object ExitSafeMode : DriverCommand
 }
@@ -23,6 +24,7 @@ object DriverReducer {
             DriverCommand.OrderReceived -> if (current.mode == DriverMode.SEARCHING) DriverMode.ORDER_RECEIVED else null
             // Completing a delivery immediately resumes automatic cluster search.
             DriverCommand.CompleteDelivery -> if (current.mode == DriverMode.ORDER_RECEIVED) DriverMode.SEARCHING else null
+            DriverCommand.EndWork -> if (current.mode != DriverMode.IDLE) DriverMode.IDLE else null
             DriverCommand.EnterSafeMode -> if (current.mode != DriverMode.SAFE_MODE) DriverMode.SAFE_MODE else null
             DriverCommand.ExitSafeMode -> if (current.mode == DriverMode.SAFE_MODE) DriverMode.IDLE else null
         }
