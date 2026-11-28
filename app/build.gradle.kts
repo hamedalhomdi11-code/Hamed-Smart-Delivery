@@ -22,7 +22,7 @@ android {
         targetSdk = 35
         versionCode = 9
         versionName = "0.5.0"
-        buildConfigField("String", "HAMED_API_BASE_URL", "\"\")"
+        buildConfigField("String", "HAMED_API_BASE_URL", "\"\"")
         buildConfigField("String", "HAMED_API_AUDIENCE", "\"https://hamed-smart-delivery-api\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["auth0Domain"] = "@string/com_auth0_domain"
