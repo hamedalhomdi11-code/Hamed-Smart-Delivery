@@ -233,3 +233,18 @@ npx wrangler dev
 - لا تزال وظائف معمارية 4 والملاحة والتجمعات تحتاج اختبارات ميدانية؛ نجاح بناء APK لا يثبت سلوكها.
 - لا دمج إلى main، ولا تغيير قاعدة الرياض أو Render أو Hamed Maps.
 
+
+
+## تحقق نشر الخادم — 2026-11-28
+
+- نجح نشر Cloudflare Worker في GitHub Actions run `46109615107` على commit `10fa3bf0dc68c30b8530362053fa8c9cd80a53e3`.
+- نجح TypeScript typecheck.
+- نجح تطبيق D1 migrations؛ لم تبقَ migrations معلقة.
+- نجح نشر Worker وأظهر Wrangler عنوان الخدمة:
+  `https://hamed-smart-delivery-api.hamedalhomdi11.workers.dev`.
+- نجح فحص ما بعد النشر: استجابة `/health` أكدت `ok: true` و`database: "connected"`.
+- أثبتت سجلات نفس النشر أن GitHub Secrets التالية لم تكن مضافة وقت التشغيل، لذلك لم يضفها workflow إلى Worker:
+  `ADMIN_INITIAL_PASSWORD`, `AUTH0_MGMT_CLIENT_ID`, `AUTH0_MGMT_CLIENT_SECRET`, `AUTH0_DB_CONNECTION`.
+- لذلك API منشور ومتصل بقاعدة D1، لكن تهيئة دخول الإدارة وإنشاء حسابات Auth0 ما زالت تنتظر إضافة الأسرار وإعداد M2M/Database Connection. لا تكتب قيم هذه الأسرار في هذا الملف.
+- تشغيل بناء التطبيقين رقم `46109737800` واختبار Android CI رقم `46109737797` كانا قيد التنفيذ عند تحديث هذا السجل؛ لا تعتبر APKs الجديدة جاهزة حتى اكتمال الرفع والتحقق.
+
