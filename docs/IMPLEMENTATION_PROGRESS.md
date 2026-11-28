@@ -90,3 +90,4 @@ Verification:
 - Physical-device start/stop, GPS fix, database import and road-route rendering still require confirmation on the user's phone.
 - Follow-up hardening: the map itself now exposes the GPS toggle; the toggle reads persisted service state and displays exceptions; GPS service start/stop and provider failures are logged; the no-provider path no longer recreates an orphaned ongoing notification after stopping.
 - The duplicate Profile GPS control was removed so the app has one clear start/stop GPS toggle on the map, matching the accepted single-control design; Profile remains for preferences and language.
+- Driver search no longer switches to SEARCHING optimistically when GPS is stopped: it waits for the foreground service's active-state broadcast, and reports a clear timeout/error if GPS cannot start. The permission prompt may remain open without prematurely expiring the pending search.
