@@ -1,3 +1,5 @@
+val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "").trim().trimEnd('/')
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,7 +15,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        buildConfigField("String", "HAMED_API_BASE_URL", "\"\"")
+        buildConfigField("String", "HAMED_API_BASE_URL", "\"${hamedApiBaseUrl}\"")
     }
     buildFeatures {
         compose = true
