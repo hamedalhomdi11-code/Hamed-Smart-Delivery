@@ -180,3 +180,14 @@ npx wrangler dev
 4. إعداد مفاتيح توقيع إصدار 0.4.3 الدائمة قبل إصدار APK تحديث متوافق مع التثبيت السابق.
 5. استكمال دعم offline 30 دقيقة والتحقق من انتهاء الجلسة، وعدم الادعاء بأنها منفذة حالياً.
 6. عدم دمج الفرع في main أو تعديل قاعدة الرياض أو خدمات Render دون موافقة منفصلة.
+
+
+## متابعة لاحقة — 2026-11-28 (بناء يشمل قاعدة الرياض)
+- تم تعديل workflow الخاص ببناء التطبيقين ليحمّل أحدث artifact ناجح لقاعدة الرياض من workflow الأصلي، ويتحقق من SQLite integrity ومن وجود جداول food_density_clusters_v3 والصيدليات النشطة، ثم يضمّن قاعدة البيانات في APK السائق.
+- نجح فحص وتنزيل قاعدة الرياض في تشغيل Build Hamed Smart Delivery Apps رقم 46107744668 (commit 000245db02ce8e0973268b6713cd1ac706d94839).
+- عند آخر تحقق، كانت خطوة `:app:testDebugUnitTest :app:assembleDebug :admin:assembleDebug` لا تزال قيد التنفيذ؛ لم تُرفع artifacts النهائية من هذا التشغيل بعد.
+- تشغيل Android CI رقم 46107744651 كان أيضاً جارياً؛ يجب انتظار اكتمال اختبار المحاكي قبل وصفه بالناجح.
+- التشغيل السابق 46107418526 نجح في بناء APK السائق والإدارة ورفع artifact منفصل لكل تطبيق، لكنه سبق تضمين قاعدة الرياض في workflow؛ لذلك لا يعتمد كنسخة نهائية للسائق.
+- روابط التحقق:
+  - Build both apps: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/actions/runs/46107744668
+  - Android CI: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/actions/runs/46107744651
