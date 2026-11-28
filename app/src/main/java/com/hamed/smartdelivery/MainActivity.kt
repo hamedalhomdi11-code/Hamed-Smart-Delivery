@@ -142,6 +142,19 @@ private fun readPersistedExclusions(prefs: android.content.SharedPreferences): M
         }
     }.toMap()
 
+private fun playStatusTone(context: Context, volume: Float, kind: String) {
+    runCatching {
+        val (toneType, durationMs) = when (kind) {
+            "welcome" -> ToneGenerator.TONE_PROP_BEEP to 240
+            "success" -> ToneGenerator.TONE_PROP_ACK to 420
+            else -> ToneGenerator.TONE_PROP_NACK to 520
+        }
+        val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, (volume * 100f).roundToInt().coerceIn(0, 100))
+        tone.startTone(toneType, durationMs)
+        Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, durationMs + 150L)
+    }
+}
+
 private fun alertRouteChanged(context: Context, soundEnabled: Boolean, vibrationEnabled: Boolean) {
     if (vibrationEnabled) runCatching {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -236,6 +249,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                     gpsMode = if (active) GpsMode.TRACKING else GpsMode.STOPPED
                     if (!active && !failure.isNullOrBlank()) {
                         pendingSearchAfterPermission = false
+                        if (announcementsEnabled) playStatusTone(context, announcementVolume, "error")
                         android.widget.Toast.makeText(context, failure, android.widget.Toast.LENGTH_LONG).show()
                     }
                 }
@@ -285,7 +299,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     LaunchedEffect(driverSnapshot.mode) {
         if (driverSnapshot.mode != previousDriverMode) {
             when (driverSnapshot.mode) {
-                DriverMode.SEARCHING -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("مبروك إتمام المهمة بنجاح. حان الوقت للبحث عن الطلبات، جاري البحث") else announceArabic("حامد سمارت دليفري يتمنى لكم يوماً مليئاً بالأرباح والطلبات. حان الوقت للبحث عن الطلبات، جاري البحث")
+                DriverMode.SEARCHING -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) {
+                    if (announcementsEnabled) playStatusTone(context, announcementVolume, "success")
+                    announceArabic("مبروك إتمام المهمة بنجاح. حان الوقت للبحث عن الطلبات، جاري البحث")
+                } else announceArabic("حامد سمارت دليفري يتمنى لكم يوماً مليئاً بالأرباح والطلبات. حان الوقت للبحث عن الطلبات، جاري البحث")
                 DriverMode.ORDER_RECEIVED -> announceArabic("تم استلام الطلب. توقف البحث مؤقتاً")
                 DriverMode.IDLE -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("اكتملت المهمة. يمكنك بدء البحث عن طلب جديد")
                 DriverMode.SAFE_MODE -> announceArabic("تم تفعيل وضع الأمان")
@@ -325,6 +342,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var welcomeAnnounced by remember { mutableStateOf(false) }
     LaunchedEffect(speechReady, announcementsEnabled) {
         if (speechReady && announcementsEnabled && !welcomeAnnounced) {
+            playStatusTone(context, announcementVolume, "welcome")
             announceArabic("مرحباً بك في حامد سمارت دليفري")
             welcomeAnnounced = true
         }
