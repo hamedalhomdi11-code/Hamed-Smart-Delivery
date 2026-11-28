@@ -1078,11 +1078,14 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
 
-                    if (searchActive && activeDestination != null && currentRoute.size > 1) {
+                    if (activeDestination != null && currentRoute.size > 1) {
+                        // Keep route monitoring active in SEARCHING and ORDER_RECEIVED.
+                        // Only the destination changes the route; the workflow mode does not disable safety rerouting.
                         val now = System.currentTimeMillis()
-                        val offRoute = routeMatch != null && routeMatch.crossTrackMeters > 55.0 && location.speed >= 2.0f
+                        val offRoute = RouteDeviationPolicy.shouldReroute(routeMatch, location)
                         offRouteFixCount = if (offRoute) offRouteFixCount + 1 else 0
-                        if (offRouteFixCount >= 2 && now - lastRerouteAt > 5000L) {
+                        if (offRouteFixCount >= RouteDeviationPolicy.REQUIRED_CONSECUTIVE_FIXES &&
+                            now - lastRerouteAt > RouteDeviationPolicy.REROUTE_COOLDOWN_MILLIS) {
                             val rerouteDestination = activeDestination
                             if (rerouteDestination != null) {
                                 lastRerouteAt = now
