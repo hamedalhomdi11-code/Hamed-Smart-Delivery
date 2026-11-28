@@ -620,6 +620,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var latestUserLocation by remember { mutableStateOf<Location?>(null) }
     var lastArrowBearing by remember { mutableFloatStateOf(Float.NaN) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
+    var completedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
@@ -740,6 +741,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     val latestSoundAlertsEnabled by rememberUpdatedState(soundAlertsEnabled)
     val latestVibrationAlertsEnabled by rememberUpdatedState(vibrationAlertsEnabled)
     val latestPerspective3D by rememberUpdatedState(perspective3D)
+    val latestRoutePoints by rememberUpdatedState(routePoints)
 
     DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, gpsMode, searchRequestId, manualSwitchRequestId, searchActive) {
         val map = mapLibreMap
@@ -757,11 +759,37 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var pulseAnimationJob: Job? = null
             var displayedMarkerLocation: LatLng? = null
             var displayedArrowBearing = 0f
+            val gpsMotionFilter = GpsMotionFilter()
+            var monotonicRouteProgress = 0.0
+            var lastProgressDrawn = -2.0
+            var offRouteFixCount = 0
+            fun drawRouteProgress(points: List<LatLng>, progressMeters: Double) {
+                val split = RouteGeometryMatcher.splitAtProgress(points, progressMeters)
+                displayedRoutePolyline?.let { map.removePolyline(it) }
+                completedRoutePolyline?.let { map.removePolyline(it) }
+                displayedRoutePolyline = if (split.remaining.size > 1) map.addPolyline(
+                    PolylineOptions().addAll(split.remaining).color(AndroidColor.rgb(13, 71, 161)).width(7f)
+                ) else null
+                completedRoutePolyline = if (split.completed.size > 1) map.addPolyline(
+                    PolylineOptions().addAll(split.completed).color(AndroidColor.rgb(135, 145, 155)).width(7f)
+                ) else null
+            }
             val restaurantMarkers = linkedMapOf<String, Marker>()
             val pharmacyMarkers = linkedMapOf<String, Marker>()
             val listener = object : LocationListener {
-                override fun onLocationChanged(location: Location) {
-                    val point = LatLng(location.latitude, location.longitude)
+                override fun onLocationChanged(rawLocation: Location) {
+                    val location = gpsMotionFilter.filter(rawLocation) ?: return
+                    val rawPoint = LatLng(location.latitude, location.longitude)
+                    val routeMatch = RouteGeometryMatcher.match(rawPoint, latestRoutePoints, monotonicRouteProgress)
+                    val confidentlyMatched = routeMatch?.takeIf { it.crossTrackMeters <= 45.0 }
+                    if (confidentlyMatched != null) {
+                        monotonicRouteProgress = maxOf(monotonicRouteProgress, confidentlyMatched.progressMeters)
+                        if (monotonicRouteProgress - lastProgressDrawn >= 1.5) {
+                            drawRouteProgress(latestRoutePoints, monotonicRouteProgress)
+                            lastProgressDrawn = monotonicRouteProgress
+                        }
+                    }
+                    val point = confidentlyMatched?.takeIf { it.crossTrackMeters <= 35.0 }?.snappedPoint ?: rawPoint
                     latestUserLocation = Location(location)
                     // A manual pan pauses follow only temporarily; resume it automatically on movement.
                     val distanceSinceCameraFix = lastCameraLocation?.distanceTo(location) ?: 0f
@@ -872,6 +900,10 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         pharmacyMarkers.values.toList().forEach { map.removeMarker(it) }
                         pharmacyMarkers.clear()
                         routePoints = emptyList()
+                        monotonicRouteProgress = 0.0
+                        lastProgressDrawn = -2.0
+                        completedRoutePolyline?.let { map.removePolyline(it) }
+                        completedRoutePolyline = null
                         routeSteps = emptyList()
                         spokenRouteStepIndex = 0
                         activeDestination = null
@@ -950,16 +982,13 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                     )
                                                 }
                                                 if (route != null && route.points.size > 1 && requestId == searchRequestId) {
-                                                    displayedRoutePolyline?.let { map.removePolyline(it) }
-                                displayedRoutePolyline = null
-                                                    displayedRoutePolyline = map.addPolyline(
-                                                        PolylineOptions().addAll(route.points)
-                                                            .color(AndroidColor.rgb(13, 71, 161)).width(7f)
-                                                    )
+                                                    monotonicRouteProgress = 0.0
+                                                    lastProgressDrawn = -2.0
                                                     routePoints = route.points
+                                                    drawRouteProgress(route.points, 0.0)
                                                     routeSteps = route.steps
                                                     spokenRouteStepIndex = 0
-                                                    routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
+                                                    routeStatus = "مسار سيارة متوازن • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د • وقود تقديري ${String.format(Locale.US, "%.1f", route.estimatedFuelLiters)} ل • ${route.alternativeCount} بدائل • لا تتوفر بيانات ازدحام/إغلاق حية"
                                                 } else if (requestId == searchRequestId) {
                                                     routeRequested = false
                                                     routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
@@ -1047,17 +1076,15 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     }
 
                     if (searchActive && activeDestination != null && currentRoute.size > 1) {
-                        val nearestDistance = currentRoute.minOf { routePoint ->
-                            val result = FloatArray(1)
-                            Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
-                            result[0]
-                        }
                         val now = System.currentTimeMillis()
-                        if (nearestDistance > 85f && now - lastRerouteAt > 20000L) {
+                        val offRoute = routeMatch != null && routeMatch.crossTrackMeters > 55.0 && location.speed >= 2.0f
+                        offRouteFixCount = if (offRoute) offRouteFixCount + 1 else 0
+                        if (offRouteFixCount >= 2 && now - lastRerouteAt > 5000L) {
                             val rerouteDestination = activeDestination
                             if (rerouteDestination != null) {
                                 lastRerouteAt = now
-                                routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
+                                offRouteFixCount = 0
+                                routeStatus = "تم تأكيد الخروج عن الطريق • جارٍ اختيار أفضل مسار سيارة بديل"
                                 val rerouteRequestId = searchRequestId
                                 routeJob = scope.launch {
                                     val updated = withContext(Dispatchers.IO) {
@@ -1068,18 +1095,15 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                     }
                                     if (isActive && rerouteRequestId == searchRequestId &&
                                         activeDestination == rerouteDestination && updated != null && updated.points.size > 1) {
-                                        displayedRoutePolyline?.let { map.removePolyline(it) }
-                                        displayedRoutePolyline = map.addPolyline(
-                                            PolylineOptions().addAll(updated.points)
-                                                .color(AndroidColor.rgb(13, 71, 161))
-                                                .width(7f)
-                                        )
+                                        monotonicRouteProgress = 0.0
+                                        lastProgressDrawn = -2.0
                                         routePoints = updated.points
+                                        drawRouteProgress(updated.points, 0.0)
                                         routeSteps = updated.steps
                                         spokenRouteStepIndex = 0
                                         alertRouteChanged(context, latestSoundAlertsEnabled, latestVibrationAlertsEnabled)
                                         onRouteChanged()
-                                        routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
+                                        routeStatus = "تم تحديث مسار السيارة • ${(updated.distanceMeters / 1000.0).toInt()} كم • وقود تقديري ${String.format(Locale.US, "%.1f", updated.estimatedFuelLiters)} ل • لا تتوفر بيانات ازدحام/إغلاق حية"
                                     } else if (isActive && rerouteRequestId == searchRequestId &&
                                         activeDestination == rerouteDestination) {
                                         routeStatus = "تعذر تحديث المسار حالياً"
@@ -1128,6 +1152,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 pharmacyMarkers.values.forEach { map.removeMarker(it) }
                 pharmacyMarkers.clear()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
+                displayedRoutePolyline?.let { map.removePolyline(it); displayedRoutePolyline = null }
+                completedRoutePolyline?.let { map.removePolyline(it); completedRoutePolyline = null }
                 userMarker?.let { map.removeMarker(it); userMarker = null }
             }
         }
