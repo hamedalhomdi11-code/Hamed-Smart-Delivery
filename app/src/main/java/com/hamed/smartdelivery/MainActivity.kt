@@ -482,7 +482,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, recenterRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onRouteChanged = { announceArabic("تم تغيير المسار. يرجى التوجه إلى التجمع الجديد عبر المسار الجديد") }, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); selectedCluster = null; clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, recenterRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onVoiceInstruction = { arabic, englishText -> announceArabic(arabic, englishText) }, onRouteChanged = { announceArabic("تم تغيير المسار. يرجى التوجه إلى التجمع الجديد عبر المسار الجديد") }, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); selectedCluster = null; clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
@@ -608,7 +608,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, recenterRequestId: Int, searchActive: Boolean, clusterWaitStartedAt: Long?, selectedClusterId: String?, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onRouteChanged: () -> Unit, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, recenterRequestId: Int, searchActive: Boolean, clusterWaitStartedAt: Long?, selectedClusterId: String?, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onVoiceInstruction: (String, String) -> Unit, onRouteChanged: () -> Unit, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -623,6 +623,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
     var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
+    var spokenRouteStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
     var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
     var clusterEnteredAt by remember(clusterWaitStartedAt, selectedClusterId) { mutableStateOf(clusterWaitStartedAt) }
@@ -632,6 +634,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             currentCluster = null
             clusterEnteredAt = null
             autoSwitchTriggered = false
+            routeSteps = emptyList()
+            spokenRouteStepIndex = 0
         }
     }
     val scope = rememberCoroutineScope()
@@ -868,6 +872,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         pharmacyMarkers.values.toList().forEach { map.removeMarker(it) }
                         pharmacyMarkers.clear()
                         routePoints = emptyList()
+                        routeSteps = emptyList()
+                        spokenRouteStepIndex = 0
                         activeDestination = null
                         routeRequested = false
                         discoveryJob?.cancel()
@@ -951,6 +957,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                             .color(AndroidColor.rgb(13, 71, 161)).width(7f)
                                                     )
                                                     routePoints = route.points
+                                                    routeSteps = route.steps
+                                                    spokenRouteStepIndex = 0
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                 } else if (requestId == searchRequestId) {
                                                     routeRequested = false
@@ -1014,6 +1022,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         .width(7f)
                                 )
                                 routePoints = route.points
+                                routeSteps = route.steps
+                                spokenRouteStepIndex = 0
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
                             } else if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination) {
                                 routeRequested = false
@@ -1022,6 +1032,19 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                     }
                     val currentRoute = routePoints
+                    if (searchActive && spokenRouteStepIndex < routeSteps.size) {
+                        val nextStep = routeSteps[spokenRouteStepIndex]
+                        val maneuverPoint = nextStep.location
+                        val maneuverDistance = maneuverPoint?.let {
+                            val distance = FloatArray(1)
+                            Location.distanceBetween(location.latitude, location.longitude, it.latitude, it.longitude, distance)
+                            distance[0]
+                        } ?: 0f
+                        if (maneuverDistance <= 250f) {
+                            onVoiceInstruction(nextStep.instruction, nextStep.instructionEnglish)
+                            spokenRouteStepIndex += 1
+                        }
+                    }
 
                     if (searchActive && activeDestination != null && currentRoute.size > 1) {
                         val nearestDistance = currentRoute.minOf { routePoint ->
@@ -1052,6 +1075,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                                 .width(7f)
                                         )
                                         routePoints = updated.points
+                                        routeSteps = updated.steps
+                                        spokenRouteStepIndex = 0
                                         alertRouteChanged(context, latestSoundAlertsEnabled, latestVibrationAlertsEnabled)
                                         onRouteChanged()
                                         routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
