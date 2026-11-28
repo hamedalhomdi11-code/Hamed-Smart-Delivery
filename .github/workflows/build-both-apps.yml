@@ -51,12 +51,18 @@ jobs:
           gradle-version: '8.11.1'
       - name: Test driver app and build both APKs
         run: |
-          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :admin:assembleDebug
+          gradle --no-daemon :app:testAuthenticatedDebugUnitTest :app:testGuestDebugUnitTest :app:assembleAuthenticatedDebug :app:assembleGuestDebug :admin:assembleDebug
       - name: Upload driver APK
         uses: actions/upload-artifact@v4
         with:
-          name: hamed-smart-delivery-driver-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: hamed-smart-delivery-driver-login-required
+          path: app/build/outputs/apk/authenticated/debug/app-authenticated-debug.apk
+          if-no-files-found: error
+      - name: Upload guest driver APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamed-smart-delivery-driver-no-login
+          path: app/build/outputs/apk/guest/debug/app-guest-debug.apk
           if-no-files-found: error
       - name: Upload Admin APK
         uses: actions/upload-artifact@v4
