@@ -9,7 +9,8 @@ data class RouteStep(
     val instruction: String,
     val distanceMeters: Double,
     val durationSeconds: Double,
-    val location: LatLng?
+    val location: LatLng?,
+    val instructionEnglish: String = instruction
 )
 
 data class RouteResult(
@@ -72,7 +73,13 @@ object OsrmRouteClient {
                             val point = if (coordinate != null && coordinate.length() >= 2)
                                 LatLng(coordinate.getDouble(1), coordinate.getDouble(0)) else null
                             if (instruction.isNotBlank()) add(
-                                RouteStep(instruction, step.optDouble("distance", 0.0), step.optDouble("duration", 0.0), point)
+                                RouteStep(
+                                    instruction,
+                                    step.optDouble("distance", 0.0),
+                                    step.optDouble("duration", 0.0),
+                                    point,
+                                    formatInstructionEnglish(type, modifier, road)
+                                )
                             )
                         }
                     }
@@ -90,6 +97,30 @@ object OsrmRouteClient {
             }
         }
         return null
+    }
+
+    private fun formatInstructionEnglish(type: String, modifier: String, road: String?): String {
+        val action = when (modifier) {
+            "left" -> "Turn left"
+            "sharp left" -> "Turn sharply left"
+            "slight left" -> "Keep slightly left"
+            "right" -> "Turn right"
+            "sharp right" -> "Turn sharply right"
+            "slight right" -> "Keep slightly right"
+            "uturn" -> "Make a U-turn"
+            "straight" -> "Continue straight"
+            else -> when (type) {
+                "depart" -> "Start driving"
+                "arrive" -> "You have arrived at your destination"
+                "roundabout", "rotary" -> "Enter the roundabout"
+                "merge" -> "Merge onto the road"
+                "fork" -> "Take the fork"
+                "on ramp" -> "Take the ramp"
+                "off ramp" -> "Take the exit"
+                else -> "Continue driving"
+            }
+        }
+        return if (road.isNullOrBlank()) action else "$action toward $road"
     }
 
     private fun formatInstruction(type: String, modifier: String, road: String?): String {
