@@ -218,10 +218,10 @@ Auth0 is used for driver identity authentication. Administrative authorization i
 
 ### 9.5 Scope and implementation status
 - This section records product and access-policy decisions only.
-- No Admin Android application has been created yet.
-- No Admin API, D1 schema, Worker route, admin device enrollment, or admin authorization method has been implemented or deployed.
-- No driver self-registration or driver self-service password-management feature is authorized.
-- This decision does not authorize changes to main, production services, existing databases, or APK builds.
+- An initial standalone Android Admin module and dashboard shell have now been created on the isolated implementation branch; it opens directly without a conventional login screen, but account-management actions remain disabled pending secure device enrollment and Admin API implementation.
+- An initial D1 migration and Worker health/driver-session routes have been added to the isolated implementation branch. They have not been deployed; no Cloudflare Worker or D1 resource has yet been created.
+- Admin device enrollment and privileged Admin API authorization are not yet implemented. Driver self-registration and driver self-service password management remain unauthorized.
+- The user has now explicitly authorized implementation and test builds for both apps, plus the integration work. Main remains protected from merge, and no production service/database is to be modified outside the dedicated new Worker/D1 resources.
 
 ## 10. Activity Log
 ### 2026-11-28 — Two-application model and Admin app opening policy confirmed
@@ -243,3 +243,18 @@ Auth0 is used for driver identity authentication. Administrative authorization i
 - Expiry is computed and enforced by backend server time; month units use calendar-month arithmetic.
 - Preserved a silent device-bound backend authorization requirement for the owner's private phone, without a visible Admin login screen. This is a backend security safeguard, not a change to the requested direct-open UI.
 - Documentation updated on the existing integration architecture branch only. No app code, backend, database, Cloudflare resource, Auth0 setting, Render service, production data, APK, or main branch was changed.
+
+
+### 2026-11-28 — Implementation branch started for Architectures 4–6 and cross-platform integration
+- Confirmed the user's latest scope: Architectures 1–3 are considered complete in the previous app; the current work starts with Architecture 4, Architecture 5, Architecture 6, and this unnumbered integration architecture. Two separate APKs are required: driver app and owner-only Admin app.
+- Compared repository refs. The Architecture 4 branch is based on `feature/0.4.3-final-integrated-gps-20261128` and is 10 commits ahead of that exact baseline. It is substantially divergent from `main` (244 commits ahead and 50 behind); therefore the implementation branch is based on the Architecture 4 branch, not on `main`, to preserve the newer 0.4.3 app and prior 1–3 work without blindly merging divergent history.
+- Created isolated branch `feature/implementation-4-5-6-integration-20261128`. No merge to `main`.
+- Added Auth0.Android 4.3.1 to the driver app, configured the public Native app identifiers and HTTPS callback placeholders, and added an initial driver authentication gate using Auth0 Universal Login, SecureCredentialsManager, and a Worker session validation request. The API base URL is deliberately not configured until the Worker has a verified deployed URL.
+- Added a Cloudflare Worker project with Auth0 RS256/JWKS verification, a health endpoint, and a driver session endpoint that checks D1 account status and validity using server time.
+- Added a first D1 migration for driver accounts, owner device enrollment records, replay-protection nonces, and audit events. The migration has not been applied to any remote database.
+- Added a standalone `:admin` Android module and an initial direct-open Admin dashboard. It has no conventional login screen. Account-management writes are intentionally disabled until the owner device enrollment and protected Admin API are implemented.
+- Added a manual-only GitHub Actions workflow for Cloudflare Worker/D1 provisioning and deployment. It uses the user-confirmed repository secret `CLOUDFLARE_API_TOKEN` and the supplied public Account ID. The workflow has not been run; no Worker/D1 resources have been created.
+- Added a GitHub Actions workflow to run driver unit tests and build both debug APKs on the implementation branch. Build/test results have not yet been verified.
+- Created `docs/EXECUTION_HANDOFF_20261128_AR.md` on the implementation branch with detailed status, commit references, blockers, and resume commands.
+- No Auth0 Management API application/credentials were created, no username-enabled database connection was verified, no admin enrollment method was enabled, no offline 30-minute authorization was implemented, no Render service was modified, no Riyadh database was changed, no APK artifact has yet been verified, and nothing was merged to `main`.
+- Next actions: verify Android CI result; complete secure Admin device enrollment and Auth0 Management API configuration; run the manual Cloudflare deployment workflow; retrieve the real Worker URL; finish account-management endpoints and app integration; implement offline authorization; then test both APKs on-device.
