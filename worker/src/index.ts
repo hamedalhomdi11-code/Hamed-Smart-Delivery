@@ -124,20 +124,25 @@ async function bootstrapAdmin(env: Env, username: string, password: string): Pro
   return true;
 }
 async function adminLogin(request: Request, env: Env): Promise<Response> {
-  if (!env.ADMIN_USERNAME) return json({ error: "admin_username_not_configured" }, 503);
-  const body = await readJson(request);
-  const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
-  const password = typeof body?.password === "string" ? body.password : "";
-  if (!username || !password || username.length > 80 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
-  const bootstrapRow = await env.DB.prepare("SELECT id FROM admin_credentials WHERE id = 1").first<{ id: number }>();
-  if (!bootstrapRow && !env.ADMIN_INITIAL_PASSWORD) return json({ error: "admin_bootstrap_secret_not_configured" }, 503);
-  const ipHash = await sha256(request.headers.get("CF-Connecting-IP") ?? "unknown-client");
-  const now = Date.now();
-  const attempts = await env.DB.prepare("SELECT failures, window_started_ms, blocked_until_ms FROM admin_login_attempts WHERE ip_hash = ?")
-    .bind(ipHash).first<{ failures: number; window_started_ms: number; blocked_until_ms: number }>();
-  if (attempts?.blocked_until_ms && attempts.blocked_until_ms > now) return json({ error: "admin_login_rate_limited" }, 429);
-  let failureStage = "bootstrap_admin";
+  let failureStage = "check_admin_config";
   try {
+    if (!env.ADMIN_USERNAME) return json({ error: "admin_username_not_configured" }, 503);
+    failureStage = "read_request";
+    const body = await readJson(request);
+    const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
+    if (!username || !password || username.length > 80 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
+    failureStage = "read_admin_bootstrap";
+    const bootstrapRow = await env.DB.prepare("SELECT id FROM admin_credentials WHERE id = 1").first<{ id: number }>();
+    if (!bootstrapRow && !env.ADMIN_INITIAL_PASSWORD) return json({ error: "admin_bootstrap_secret_not_configured" }, 503);
+    failureStage = "hash_client_ip";
+    const ipHash = await sha256(request.headers.get("CF-Connecting-IP") ?? "unknown-client");
+    const now = Date.now();
+    failureStage = "read_login_attempts";
+    const attempts = await env.DB.prepare("SELECT failures, window_started_ms, blocked_until_ms FROM admin_login_attempts WHERE ip_hash = ?")
+      .bind(ipHash).first<{ failures: number; window_started_ms: number; blocked_until_ms: number }>();
+    if (attempts?.blocked_until_ms && attempts.blocked_until_ms > now) return json({ error: "admin_login_rate_limited" }, 429);
+    failureStage = "bootstrap_admin";
     const ok = await bootstrapAdmin(env, username, password);
     if (!ok) {
       const failures = attempts && now - attempts.window_started_ms < 15 * 60 * 1000 ? attempts.failures + 1 : 1;
