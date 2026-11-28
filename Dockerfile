@@ -18,6 +18,7 @@ RUN set -e; \
     APK=app/build/outputs/apk/debug/app-debug.apk; \
     test -s "$APK"; \
     unzip -l "$APK" | grep -q 'assets/hamed_smart_delivery_riyadh.sqlite'; \
+    "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "package: name='com.hamed.smartdelivery'"; \
     "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "versionName='0.4.3'"; \
     "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "versionCode='8'"; \
     "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > /srv/apk-signature.txt 2>&1; \
