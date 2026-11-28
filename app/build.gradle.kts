@@ -1,10 +1,10 @@
-val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "").trim().trimEnd('/')
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "").trim().trimEnd('/')
 
 val hamedKeystoreFile = System.getenv("HAMED_KEYSTORE_FILE")
 val hamedKeystorePassword = System.getenv("HAMED_KEYSTORE_PASSWORD")
