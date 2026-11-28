@@ -63,7 +63,7 @@ function getJwks(domain: string) {
   const normalized = domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
   let jwks = jwksCache.get(normalized);
   if (!jwks) {
-    jwks = createRemoteJWKSet(new URL(\`https://\${normalized}/.well-known/jwks.json\`));
+    jwks = createRemoteJWKSet(new URL(`https://${normalized}/.well-known/jwks.json`));
     jwksCache.set(normalized, jwks);
   }
   return { normalized, jwks };
@@ -74,7 +74,7 @@ async function authenticate(request: Request, env: Env): Promise<AuthenticatedId
   try {
     const { normalized, jwks } = getJwks(env.AUTH0_DOMAIN);
     const verified = await jwtVerify(match[1], jwks, {
-      issuer: \`https://\${normalized}/\`, audience: env.AUTH0_AUDIENCE, algorithms: ["RS256"],
+      issuer: `https://${normalized}/`, audience: env.AUTH0_AUDIENCE, algorithms: ["RS256"],
     });
     if (!verified.payload.sub) return json({ error: "token_subject_missing" }, 401);
     return { subject: verified.payload.sub, claims: verified.payload };
@@ -86,8 +86,8 @@ async function driverSession(request: Request, env: Env): Promise<Response> {
   const now = Date.now();
   try {
     const account = await env.DB.prepare(
-      \`SELECT id, username, status, valid_from_ms, valid_until_ms
-       FROM driver_accounts WHERE auth0_sub = ? LIMIT 1\`,
+      `SELECT id, username, status, valid_from_ms, valid_until_ms
+       FROM driver_accounts WHERE auth0_sub = ? LIMIT 1`,
     ).bind(identity.subject).first<{
       id: string; username: string; status: string; valid_from_ms: number; valid_until_ms: number;
     }>();
@@ -201,11 +201,11 @@ async function getManagementToken(env: Env): Promise<string> {
   }
   if (managementToken && managementToken.expiresAt > Date.now() + 60000) return managementToken.value;
   const domain = env.AUTH0_DOMAIN.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  const response = await fetch(\`https://\${domain}/oauth/token\`, {
+  const response = await fetch(`https://${domain}/oauth/token`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({
       grant_type: "client_credentials", client_id: env.AUTH0_MGMT_CLIENT_ID,
-      client_secret: env.AUTH0_MGMT_CLIENT_SECRET, audience: \`https://\${domain}/api/v2/\`,
+      client_secret: env.AUTH0_MGMT_CLIENT_SECRET, audience: `https://${domain}/api/v2/`,
     }),
   });
   if (!response.ok) throw new Error("auth0_management_token_failed");
@@ -216,8 +216,8 @@ async function getManagementToken(env: Env): Promise<string> {
 async function auth0Request(env: Env, path: string, method = "GET", body?: unknown): Promise<any> {
   const token = await getManagementToken(env);
   const domain = env.AUTH0_DOMAIN.replace(/^https?:\/\//, "").replace(/\/$/, "");
-  const response = await fetch(\`https://\${domain}/api/v2/\${path}\`, {
-    method, headers: { authorization: \`Bearer \${token}\`, "content-type": "application/json" },
+  const response = await fetch(`https://${domain}/api/v2/${path}`, {
+    method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -276,7 +276,7 @@ async function createDriver(request: Request, env: Env): Promise<Response> {
     return json({ created: true, driver: { id, username, status: "active", validFromMs: now, validUntilMs: validUntil } }, 201);
   } catch (error) {
     if (auth0UserId) {
-      try { await auth0Request(env, \`users/\${encodeURIComponent(auth0UserId)}\`, "DELETE"); } catch { /* best-effort rollback */ }
+      try { await auth0Request(env, `users/${encodeURIComponent(auth0UserId)}`, "DELETE"); } catch { /* best-effort rollback */ }
     }
     const message = error instanceof Error ? error.message : "driver_create_failed";
     if (message.includes("auth0_management_api_not_configured")) return json({ error: message }, 503);
@@ -303,7 +303,7 @@ async function setDriverStatus(env: Env, id: string, enabled: boolean): Promise<
     .first<{ id: string; auth0_sub: string }>();
   if (!row) return json({ error: "driver_not_found" }, 404);
   try {
-    await auth0Request(env, \`users/\${encodeURIComponent(row.auth0_sub)}\`, "PATCH", { blocked: !enabled });
+    await auth0Request(env, `users/${encodeURIComponent(row.auth0_sub)}`, "PATCH", { blocked: !enabled });
     const now = Date.now();
     await env.DB.prepare("UPDATE driver_accounts SET status = ?, disabled_at_ms = ?, updated_at_ms = ? WHERE id = ?")
       .bind(enabled ? "active" : "disabled", enabled ? null : now, now, id).run();
@@ -318,7 +318,7 @@ async function resetDriverPassword(request: Request, env: Env, id: string): Prom
   const row = await env.DB.prepare("SELECT auth0_sub FROM driver_accounts WHERE id = ?").bind(id).first<{ auth0_sub: string }>();
   if (!row) return json({ error: "driver_not_found" }, 404);
   try {
-    await auth0Request(env, \`users/\${encodeURIComponent(row.auth0_sub)}\`, "PATCH", { password, connection: env.AUTH0_DB_CONNECTION });
+    await auth0Request(env, `users/${encodeURIComponent(row.auth0_sub)}`, "PATCH", { password, connection: env.AUTH0_DB_CONNECTION });
     await audit(env, "driver_password_reset", id);
     return json({ passwordReset: true });
   } catch { return json({ error: "auth0_password_reset_failed" }, 502); }
