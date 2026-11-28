@@ -268,6 +268,9 @@ private fun AdminDashboard() {
                             }
                         }
                         Text("تُنشأ هوية السائق في Auth0 وتُربط بصلاحية خادمية. كلمة المرور لا تُحفظ في قاعدة التطبيق.", color = Muted, fontSize = 11.sp)
+                        if (message != "تم تحديث قائمة السائقين.") {
+                            Text(message, color = if (message == "تم إنشاء حساب السائق.") Mint else Color(0xFFFFA36C), fontSize = 12.sp)
+                        }
                     }
                 },
                 confirmButton = {
@@ -279,7 +282,10 @@ private fun AdminDashboard() {
                                 .onFailure { message = it.message ?: "تعذر إنشاء الحساب." }
                             loading = false
                         }
-                    }) { Text("إنشاء") }
+                    }) {
+                        if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Text("إنشاء")
+                    }
                 },
                 dismissButton = { TextButton(onClick = { showCreate = false }) { Text("إلغاء") } }
             )
