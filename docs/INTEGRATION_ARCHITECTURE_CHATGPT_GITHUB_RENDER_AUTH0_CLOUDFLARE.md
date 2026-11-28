@@ -202,15 +202,14 @@ The product consists of two distinct applications with separate responsibilities
 - Drivers cannot self-register, create accounts, change/reset their own passwords through the Admin app, extend their own validity, or change their account status/role.
 - Account administration actions are performed through the central backend; the backend is the source of truth and records an audit trail.
 - The driver app must enforce the backend account state and validity using server time. A client-side clock or local flag must never extend account validity.
-- The account duration selector must support at least: 1 day, 2 days, 3 days, 4 days, 1 week, and 1 calendar month. The chosen duration is converted by the backend into explicit validity start/end timestamps. “One month” means a calendar month, not a fixed 30 days, unless the user later specifies otherwise.
+- The Admin app must provide manual duration entry: a numeric value entered by the administrator plus a unit selector (days, weeks, or months). Do not limit the UI to fixed presets. The system may offer shortcuts, but manual entry is the required behavior. The backend converts the entered value and unit into explicit validity start/end timestamps using server time. A month is a calendar month, not an assumed 30 days.
 - On expiry or administrative disablement, the driver must be denied a new login/session and new work. Existing offline/session handling remains governed by Architecture 6 and must not silently extend expiry.
 
 ### 9.3 Admin app opening behavior — explicit user decision
-- The Admin app itself opens directly without an in-app login screen, username, or password. This is an explicit product requirement confirmed by the user on 2026-11-28.
-- This requirement applies to the app's opening experience; it does not make the administrative API public or remove the need to protect privileged operations.
-- **Security blocker before implementation:** an app with no login screen and unrestricted admin API access would allow anyone who obtains the app/device to create accounts, reset passwords, or extend driver access. Therefore, the backend must not accept anonymous administrative requests.
-- The implementation must preserve the no-login-screen requirement while a separate trusted-admin authorization method is designed (for example, a pre-enrolled owner device with a device-bound credential stored in Android Keystore, with optional OS biometric/device authentication). This is a proposal, not yet an approved final mechanism. Do not implement or deploy privileged Admin endpoints until the user approves the trust mechanism.
-- If the user intends absolutely no authentication, device trust, biometric/device lock, or other authorization of any kind for administrative actions, that creates a critical security exposure and must be explicitly revisited before production.
+- The Admin app itself opens directly without an in-app login screen, username, or password. It is private and used only by the owner on the owner's own phone; the user confirmed it will not be given to anyone else.
+- The Admin app is private and intended exclusively for the owner on the owner's own phone; the user states it will not be distributed or given to anyone else.
+- The app opens directly with no in-app login screen, username, or password. This is an explicit user requirement and is not to be replaced with a conventional login screen.
+- The private/single-owner distribution model is a product assumption, not cryptographic proof of identity. Privileged Worker endpoints must still reject anonymous requests. Preserve the seamless opening experience with a silent device-bound credential/enrollment mechanism (for example, a key generated and held in Android Keystore on the owner's phone); do not add a visible login form. If the phone is replaced or the app is reinstalled, a controlled owner re-enrollment/recovery process will be needed. This implementation detail must be designed before production admin endpoints are enabled.
 
 ### 9.4 Relationship between the applications and backend
 Admin app -> protected administrative API on Cloudflare Worker -> D1 account records / audit log.
@@ -229,7 +228,18 @@ Auth0 is used for driver identity authentication. Administrative authorization i
 - User confirmed the product will have two separate apps: Hamed Smart Delivery for drivers and Hamed Smart Delivery Admin for account administration.
 - User confirmed only the owner/administration may create driver accounts and manage passwords, account validity, extensions, disablement, and reactivation. Drivers have no self-registration or self-administration privileges.
 - User explicitly decided that the Admin app opens without an in-app login screen, username, or password. Driver authentication remains required in Hamed Smart Delivery.
-- Recorded the required validity presets: 1, 2, 3, 4 days, 1 week, and 1 calendar month; backend/server time remains authoritative.
-- Security boundary recorded: the no-login-screen requirement must not result in anonymous privileged backend endpoints. A device-bound trusted-admin authorization approach is proposed for later approval; no final mechanism is selected or implemented.
+- User clarified the Admin app is private and will only be used by the owner on the owner's own phone; it will not be distributed to other people. Keep the direct-open experience with no visible login form.
+- Replaced fixed validity presets with manual entry: numeric duration + unit selector for days, weeks, or months. The server computes the expiry; a month is calendar-based.
+- Validity countdown begins at the timestamp when the account is created with a duration assigned. If an account is created first and its duration is assigned later, countdown begins when that duration is assigned (not retroactively from account creation). If an administrator later changes/reassigns the duration, the new validity period begins from the time that change is saved unless a separate scheduled start is explicitly introduced in a future decision.
+- Security detail: private distribution does not make backend admin routes public. Preserve no-login-screen UX using a silent device-bound credential on the owner's phone; this is not a user-facing login and needs a controlled re-enrollment path if the phone/app is replaced.
 - Documentation-only change on the existing integration architecture branch. No Android app, Worker, D1, Auth0 dashboard, Cloudflare resource, Render service, or production data was changed. No merge, deployment, or APK build was performed.
-- Next: settle the trusted-admin authorization mechanism and remaining Architecture 6 account/session decisions before implementing Admin app/backend privileges.
+- Next: settle device-bound enrollment/recovery details and remaining Architecture 6 session decisions before implementing Admin app/backend privileges.
+
+
+### 2026-11-28 — Manual account validity entry and owner-only Admin device clarified
+- User confirmed the Admin app will remain exclusively on the owner's own phone and will not be given to anyone else; the app must open directly without a visible login screen or password prompt.
+- Account validity input is manual: administrator enters a number and chooses days, weeks, or months. Fixed preset buttons are not a substitute for this required free-form entry.
+- Countdown start rule: if validity is assigned while creating the account, it starts at account creation/assignment time. If an account exists without a duration and validity is assigned later, it starts when the duration is assigned. If validity is changed later, the new period starts when that change is saved, unless a future explicit scheduling feature is approved.
+- Expiry is computed and enforced by backend server time; month units use calendar-month arithmetic.
+- Preserved a silent device-bound backend authorization requirement for the owner's private phone, without a visible Admin login screen. This is a backend security safeguard, not a change to the requested direct-open UI.
+- Documentation updated on the existing integration architecture branch only. No app code, backend, database, Cloudflare resource, Auth0 setting, Render service, production data, APK, or main branch was changed.
