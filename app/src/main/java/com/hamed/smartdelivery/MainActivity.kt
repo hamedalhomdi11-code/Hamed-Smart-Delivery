@@ -780,7 +780,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 override fun onLocationChanged(rawLocation: Location) {
                     val location = gpsMotionFilter.filter(rawLocation) ?: return
                     val rawPoint = LatLng(location.latitude, location.longitude)
-                    val routeMatch = RouteGeometryMatcher.match(rawPoint, latestRoutePoints, monotonicRouteProgress)
+                    val routeMatch = RouteGeometryMatcher.match(rawPoint, latestRoutePoints, monotonicRouteProgress, if (location.hasBearing()) location.bearing.toDouble() else null, location.speed.toDouble())
                     val confidentlyMatched = routeMatch?.takeIf { it.crossTrackMeters <= 45.0 }
                     if (confidentlyMatched != null) {
                         monotonicRouteProgress = maxOf(monotonicRouteProgress, confidentlyMatched.progressMeters)
