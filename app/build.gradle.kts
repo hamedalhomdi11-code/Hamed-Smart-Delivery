@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "").trim().trimEnd('/')
+val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "https://hamed-smart-delivery-api.hamedalhomdi11.workers.dev").trim().trimEnd('/')
 
 val hamedKeystoreFile = System.getenv("HAMED_KEYSTORE_FILE")
 val hamedKeystorePassword = System.getenv("HAMED_KEYSTORE_PASSWORD")
