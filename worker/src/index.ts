@@ -136,27 +136,39 @@ async function adminLogin(request: Request, env: Env): Promise<Response> {
   const attempts = await env.DB.prepare("SELECT failures, window_started_ms, blocked_until_ms FROM admin_login_attempts WHERE ip_hash = ?")
     .bind(ipHash).first<{ failures: number; window_started_ms: number; blocked_until_ms: number }>();
   if (attempts?.blocked_until_ms && attempts.blocked_until_ms > now) return json({ error: "admin_login_rate_limited" }, 429);
+  let failureStage = "bootstrap_admin";
   try {
     const ok = await bootstrapAdmin(env, username, password);
     if (!ok) {
       const failures = attempts && now - attempts.window_started_ms < 15 * 60 * 1000 ? attempts.failures + 1 : 1;
       const windowStarted = failures === 1 ? now : attempts!.window_started_ms;
       const blockedUntil = failures >= 5 ? now + 15 * 60 * 1000 : 0;
+      failureStage = "record_failed_attempt";
       await env.DB.prepare("INSERT INTO admin_login_attempts (ip_hash, failures, window_started_ms, blocked_until_ms) VALUES (?, ?, ?, ?) ON CONFLICT(ip_hash) DO UPDATE SET failures = excluded.failures, window_started_ms = excluded.window_started_ms, blocked_until_ms = excluded.blocked_until_ms")
         .bind(ipHash, failures, windowStarted, blockedUntil).run();
       return json({ error: failures >= 5 ? "admin_login_rate_limited" : "invalid_credentials" }, failures >= 5 ? 429 : 401);
     }
+    failureStage = "clear_login_attempt";
     await env.DB.prepare("DELETE FROM admin_login_attempts WHERE ip_hash = ?").bind(ipHash).run();
     const token = base64Url(randomBytes(32));
     const tokenHash = await sha256(token);
     const days = Math.min(90, Math.max(1, Number(env.ADMIN_SESSION_DAYS ?? "30") || 30));
     const expires = Date.now() + days * 86400000;
+    failureStage = "create_admin_session";
     await env.DB.prepare("INSERT INTO admin_sessions (token_hash, username, expires_at_ms, created_at_ms, last_seen_at_ms) VALUES (?, ?, ?, ?, ?)")
       .bind(tokenHash, env.ADMIN_USERNAME, expires, Date.now(), Date.now()).run();
+    failureStage = "write_admin_audit";
     await env.DB.prepare("INSERT INTO audit_log (id, action, target_type, metadata_json, created_at_ms) VALUES (?, 'admin_login', 'admin', '{}', ?)")
       .bind(crypto.randomUUID(), Date.now()).run();
     return json({ authenticated: true, token, username: env.ADMIN_USERNAME, expiresAtMs: expires });
-  } catch { return json({ error: "admin_authentication_unavailable" }, 503); }
+  } catch (error) {
+    // Diagnostic stage only; never log credentials, tokens, or request bodies.
+    console.error("admin_login_failed", {
+      stage: failureStage,
+      error: error instanceof Error ? error.message.slice(0, 240) : "unknown_error",
+    });
+    return json({ error: "admin_authentication_unavailable" }, 503);
+  }
 }
 async function requireAdmin(request: Request, env: Env): Promise<AdminIdentity | Response> {
   const match = /^Bearer\s+(.+)$/i.exec(request.headers.get("authorization") ?? "");
