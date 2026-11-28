@@ -18,6 +18,28 @@ class NavigationEngineTest {
     }
 
     @Test
+    fun routeDeviationTriggersForAccurateMovingFixFarFromRoute() {
+        val location = android.location.Location("test").apply {
+            latitude = 24.01
+            longitude = 46.005
+            speed = 12f
+            accuracy = 8f
+        }
+        val match = RouteMatch(LatLng(24.01, 46.005), 1_100.0, 500.0, 0)
+        assertTrue(RouteDeviationPolicy.shouldReroute(match, location))
+    }
+
+    @Test
+    fun routeDeviationIgnoresSlowOrInaccurateGpsFixes() {
+        val match = RouteMatch(LatLng(24.01, 46.005), 1_100.0, 500.0, 0)
+        val slow = android.location.Location("test").apply { speed = 0.5f; accuracy = 5f }
+        val inaccurate = android.location.Location("test").apply { speed = 8f; accuracy = 120f }
+        assertTrue(!RouteDeviationPolicy.shouldReroute(match, slow))
+        assertTrue(!RouteDeviationPolicy.shouldReroute(match, inaccurate))
+        assertTrue(!RouteDeviationPolicy.shouldReroute(null, slow))
+    }
+
+    @Test
     fun routeProgressSplitsCompletedGreyAndRemainingBlueGeometry() {
         val route = listOf(LatLng(24.0, 46.0), LatLng(24.0, 46.01), LatLng(24.01, 46.01))
         val halfFirstSegment = RouteGeometryMatcher.routeLengthMeters(route) * 0.25
