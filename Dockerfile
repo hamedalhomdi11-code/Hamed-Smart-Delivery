@@ -1,4 +1,4 @@
-FROM ghcr.io/cirruslabs/android-sdk:35
+FROM ghcr.io/cirruslabs/android-sdk:35 AS builder
 ENV DEBIAN_FRONTEND=noninteractive ANDROID_HOME=/opt/android-sdk-linux ANDROID_SDK_ROOT=/opt/android-sdk-linux
 WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip curl unzip osmium-tool && rm -rf /var/lib/apt/lists/*
