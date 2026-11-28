@@ -1,0 +1,110 @@
+# Integration Architecture — ChatGPT, GitHub, Render, Auth0 and Cloudflare
+
+> Status: DESIGN + DISCOVERY IN PROGRESS (2026-11-28)
+> This is an unnumbered cross-platform integration architecture. It is not Architecture 4, 5, or 6 and does not renumber or replace them.
+
+## 1. Purpose
+Define a safe, auditable operating model connecting the user's ChatGPT work with the Hamed Smart Delivery GitHub repository, Render resources, Auth0 tenant, and Cloudflare Workers/D1. Every material discovery, decision, edit, test, deployment, blocker, and user action performed during this integration must be recorded in this document's chronological Activity Log, with date/time, system, exact resource/branch, outcome, and next step. Update this document in the same work session after each material operation; never record secrets or personal tokens.
+
+## 2. Scope and non-goals
+- In scope: integration design, repository automation, CI/CD credentials, Auth0 authentication, Cloudflare Worker API and D1 account metadata, Render resource inventory and any explicitly approved integration.
+- Out of scope: Hamed Maps / hamed-maps-gateway application logic; Android navigation, GPS, restaurant clustering, Riyadh database content, and production driver data.
+- Do not modify the Android app's production behavior, Riyadh database, existing Render services, or existing Render databases during this integration unless separately approved.
+- Do not merge to main, deploy, create billable resources, enable paid plans, or change billing without explicit approval.
+- No secret, API token, password, private key, recovery code, or credential value may be committed to Git or written in this document.
+
+## 3. Current confirmed baseline
+### GitHub
+- Repository: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery
+- Default branch observed via repository file links: main.
+- Existing workflow: .github/workflows/android-ci.yml; runs Android unit tests and debug APK build on push/PR/dispatch.
+- Existing docs: docs/SYSTEM_ARCHITECTURE.md, docs/INTEGRATIONS.md, docs/ROADMAP.md.
+- User reports that repository secret CLOUDFLARE_API_TOKEN has been added. This is user-confirmed, not independently readable or verifiable by the assistant.
+- No Cloudflare deployment workflow has yet been verified in the repository.
+### Render
+- Connected Render workspace: My Workspace (workspace ID recorded only in private tool context; do not publish credentials).
+- Existing Hamed Smart Delivery services observed:
+  - hamed-smart-delivery-043-recovery-builder, branch feature/0.4.3-final-integrated-gps-20261128, free plan, auto-deploy off.
+  - hamed-smart-delivery-043-final-builder, same branch, free plan, auto-deploy off.
+  - hamed-smart-delivery-apk-builder, branch feature/architecture-1-2-implementation-20261127, free plan, auto-deploy on.
+- Other observed services include Hamed Maps services. They are explicitly outside this project's scope and must not be changed.
+- No Render resource has been modified or deployed as part of this integration.
+### Auth0
+- User reports an Auth0 account/tenant was created.
+- Tenant domain, application/client ID, API audience, callback URLs, and credentials are not yet supplied or independently verified.
+- No Auth0 integration or configuration change has been made.
+### Cloudflare
+- User reports a Cloudflare account and API token were created.
+- User reports the token is stored in GitHub repository secret CLOUDFLARE_API_TOKEN.
+- Token value is never requested, displayed, or stored in this document.
+- Worker, D1 database, account ID, zone configuration, and deployment status are not yet verified.
+- No Cloudflare resource has been created, modified, or deployed as part of this integration.
+
+## 4. Target architecture
+1. ChatGPT is the operator/planning interface. It can inspect and edit repository content through the connected GitHub integration and inspect Render resources through the connected Render integration. These integrations do not automatically grant direct Auth0 or Cloudflare dashboard/API access.
+2. GitHub is the source of truth for code, architecture documents, pull requests, and CI/CD workflows. Changes are made on a dedicated feature/docs branch, reviewed, tested, and merged only with user approval.
+3. GitHub Actions is the controlled automation runner. It reads repository Actions secrets at runtime and never prints them. CLOUDFLARE_API_TOKEN is intended only for Cloudflare deployment operations. Use least-privilege, pinned actions, explicit environments/branch protections where available, and avoid secrets on untrusted pull-request jobs.
+4. Cloudflare Worker is the public HTTPS API boundary for account lifecycle operations. It validates Auth0 access tokens (issuer, audience, signature/JWKS, expiry) and applies authorization/business rules. It must not trust client-supplied role, expiry, or account status.
+5. Cloudflare D1 stores application account metadata and administrative entitlement state only: stable Auth0 subject identifier, role/status, validity start/end, audit metadata, and device/session revocation metadata as required. Never store plaintext passwords, Auth0 client secrets, or unnecessary personal/customer delivery data.
+6. Auth0 performs identity authentication and credential lifecycle. The Android client authenticates with an appropriate native/mobile flow (Authorization Code + PKCE); no client secret is embedded in the APK. Auth0 access tokens are sent to the Worker API.
+7. Worker verifies account enablement and validity using server time and D1. It returns minimal account state and, if the offline design is implemented, a short-lived signed offline authorization artifact with explicit expiry and anti-clock-tampering considerations.
+8. Render remains the existing build/deployment platform for the Android builder services. It is not assumed to host the account API. Existing Render services are read-only during discovery; any future change requires explicit approval and cost review.
+9. Android app remains functional offline and must fail safely. It must not accept commands or account privileges merely because a local flag says so. Existing navigation and Riyadh data remain independent of the identity service.
+
+## 5. Trust boundaries and security rules
+- Secrets only in GitHub Actions Secrets / provider secret stores. Never in source, workflow literals, APK, logs, issues, commits, or this document.
+- Never ask the user to paste Cloudflare/Auth0 secrets into ChatGPT.
+- Cloudflare token scope must remain limited to the single intended Cloudflare account and only the exact Worker/D1 permissions required. Rotate/revoke if exposure is suspected.
+- Do not use a non-expiring API token casually; schedule a controlled rotation and keep a revocation procedure.
+- Auth0 mobile client is public/native and uses PKCE; do not create a client secret for the Android APK.
+- Worker API must validate JWT cryptographically and enforce issuer, audience, expiry, subject, scopes/roles, account state, and rate limits.
+- D1 schema changes require migrations, backups/export strategy, and explicit approval before touching any existing production database.
+- All administrative changes are authenticated, authorized, audited, and revocable.
+- No production deployment until tests, configuration review, cost review, and user approval.
+
+## 6. Staged implementation plan
+### Stage A — discovery (current)
+- Verify repository branches/files/workflows and secret name existence only where GitHub provides safe metadata; never reveal secret values.
+- Verify Render workspace and identify which service is actually relevant; no mutation.
+- Obtain only non-secret Auth0 metadata needed for configuration (tenant domain, native application type, API audience).
+- Verify Cloudflare account ID and whether the token has the intended least-privilege permissions; do not request token value.
+### Stage B — repository automation
+- Add a Cloudflare Worker deployment workflow on a dedicated branch, triggered by workflow_dispatch and controlled pushes only after review.
+- Pin action versions; use CLOUDFLARE_API_TOKEN and non-secret account/resource IDs as environment variables or GitHub variables.
+- Configure a safe validation-only workflow first; do not deploy until resource identifiers and user approval are present.
+### Stage C — Auth0 setup
+- Create/configure a Native Application for Android with Authorization Code + PKCE.
+- Define an Auth0 API audience for the Worker API.
+- Configure allowed callback/logout URLs using the final Android application scheme/package and tested app links.
+- Record only public metadata in repository configuration; keep client credentials out of APK.
+### Stage D — Cloudflare Worker and D1
+- Define Worker API routes and JWT validation.
+- Create a new dedicated D1 database only after user approval; do not reuse or alter the Riyadh database.
+- Add versioned SQL migrations and tests.
+- Implement account administration API, status/time validity checks, audit events, revocation, and offline grant design.
+### Stage E — Render alignment (only if needed)
+- Decide whether Render is only building Android artifacts or has a specific approved API role.
+- Do not repurpose or alter existing builder services. If a new service is needed, present its plan/cost and obtain approval first.
+### Stage F — verification and rollout
+- Automated tests, security checks, staging deployment, Auth0 login tests, account validity boundary tests, offline/online recovery tests, audit verification.
+- Production rollout only after explicit user approval.
+
+## 7. Acceptance criteria
+- No secrets in Git history, logs, APK, docs, or chat.
+- GitHub Actions can validate and deploy only from approved branches/environments.
+- Auth0 tokens are cryptographically validated by the Worker.
+- D1 account status and validity are enforced using server time.
+- No paid plan or automatic paid upgrade is enabled without approval.
+- No change to Riyadh data, Hamed Maps, existing Render services, or Android navigation without explicit approval.
+- All material work is appended to the Activity Log.
+
+## 8. Activity Log
+### 2026-11-28 — Initial integration discovery
+- GitHub: inspected README.md, docs/SYSTEM_ARCHITECTURE.md, docs/INTEGRATIONS.md, docs/ROADMAP.md, and .github/workflows/android-ci.yml on main.
+- GitHub: confirmed current Android CI builds/tests debug APK; no Cloudflare workflow was verified through the inspected files.
+- GitHub: user confirmed repository secret CLOUDFLARE_API_TOKEN was added. Secret value was not accessed.
+- Render: listed workspace services read-only. Identified three Hamed Smart Delivery builder services; no service changed or deployed.
+- Auth0: user reports account created; tenant/application/API metadata still missing.
+- Cloudflare: user reports account and API token created; Worker/D1 resources and deployment are not verified.
+- Boundary: Hamed Maps services and Riyadh database remain out of scope and untouched.
+- Next: create a dedicated documentation branch and record this architecture; then continue with branch/file inventory and controlled workflow design. No deployment or paid resource creation is authorized by this log.
