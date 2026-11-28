@@ -42,6 +42,18 @@ class ArchitecturePolicyTest {
         assertEquals(ClusterPolicy.AUTO_EXCLUSION_MILLIS, automatic.untilEpochMillis - 1000L)
     }
 
+    @Test fun manualAndAutomaticExclusionsExpireAtTheirExactDeadlines() {
+        val manual = ClusterPolicy.manualSwitch("manual", 10_000L)
+        assertTrue(ClusterPolicy.isTemporarilyExcluded(manual, 10_000L))
+        assertTrue(ClusterPolicy.isTemporarilyExcluded(manual, 10_000L + ClusterPolicy.MANUAL_EXCLUSION_MILLIS - 1))
+        assertFalse(ClusterPolicy.isTemporarilyExcluded(manual, 10_000L + ClusterPolicy.MANUAL_EXCLUSION_MILLIS))
+
+        val automatic = ClusterPolicy.automaticTimeout("automatic", 20_000L)
+        assertTrue(ClusterPolicy.isTemporarilyExcluded(automatic, 20_000L))
+        assertTrue(ClusterPolicy.isTemporarilyExcluded(automatic, 20_000L + ClusterPolicy.AUTO_EXCLUSION_MILLIS - 1))
+        assertFalse(ClusterPolicy.isTemporarilyExcluded(automatic, 20_000L + ClusterPolicy.AUTO_EXCLUSION_MILLIS))
+    }
+
     @Test fun visitedClusterNeedsFourOtherClustersUnlessItProducedAnOrder() {
         val visit = ClusterVisit("a", 1L, otherClustersVisitedSince = 3)
         assertFalse(ClusterPolicy.canRepeat(visit, false))
