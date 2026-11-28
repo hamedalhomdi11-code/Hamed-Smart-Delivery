@@ -40,7 +40,11 @@ function randomBytes(size: number): Uint8Array {
 async function sha256(value: string): Promise<string> {
   return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))));
 }
-async function derivePassword(password: string, salt: Uint8Array, iterations = 210000): Promise<string> {
+const MAX_PBKDF2_ITERATIONS = 100000;
+async function derivePassword(password: string, salt: Uint8Array, iterations = MAX_PBKDF2_ITERATIONS): Promise<string> {
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_PBKDF2_ITERATIONS) {
+    throw new Error("password_hash_iterations_unsupported");
+  }
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, 256);
   return bytesToHex(new Uint8Array(bits));
@@ -109,6 +113,20 @@ async function bootstrapAdmin(env: Env, username: string, password: string): Pro
     .first<{ username: string; salt: string; password_hash: string; iterations: number }>();
   if (existing) {
     if (existing.username.toLowerCase() !== username.toLowerCase()) return false;
+    // Older builds could store an iteration count above the Workers WebCrypto
+    // limit. Such hashes cannot be verified here; recover only with the
+    // protected bootstrap secret, then transparently re-hash at the supported
+    // cost using a fresh salt.
+    if (existing.iterations > MAX_PBKDF2_ITERATIONS) {
+      if (!env.ADMIN_INITIAL_PASSWORD ||
+          !constantTimeEqual(await sha256(password), await sha256(env.ADMIN_INITIAL_PASSWORD))) return false;
+      const salt = randomBytes(16);
+      const iterations = MAX_PBKDF2_ITERATIONS;
+      const hash = await derivePassword(password, salt, iterations);
+      await env.DB.prepare("UPDATE admin_credentials SET salt = ?, password_hash = ?, iterations = ?, updated_at_ms = ? WHERE id = 1")
+        .bind(bytesToHex(salt), hash, iterations, Date.now()).run();
+      return true;
+    }
     const hash = await derivePassword(password, Uint8Array.from(existing.salt.match(/.{2}/g)?.map(x => parseInt(x, 16)) ?? []), existing.iterations);
     return constantTimeEqual(hash, existing.password_hash);
   }
@@ -116,7 +134,7 @@ async function bootstrapAdmin(env: Env, username: string, password: string): Pro
       !constantTimeEqual(username.toLowerCase(), env.ADMIN_USERNAME.toLowerCase()) ||
       !constantTimeEqual(await sha256(password), await sha256(env.ADMIN_INITIAL_PASSWORD))) return false;
   const salt = randomBytes(16);
-  const iterations = 210000;
+  const iterations = MAX_PBKDF2_ITERATIONS;
   const hash = await derivePassword(password, salt, iterations);
   await env.DB.prepare(
     "INSERT INTO admin_credentials (id, username, salt, password_hash, iterations, created_at_ms, updated_at_ms) VALUES (1, ?, ?, ?, ?, ?, ?)",
@@ -208,7 +226,7 @@ async function changeAdminPassword(request: Request, env: Env): Promise<Response
   if (!constantTimeEqual(await derivePassword(current, saltBytes, row.iterations), row.password_hash)) return json({ error: "current_password_invalid" }, 401);
   const salt = randomBytes(16);
   const hash = await derivePassword(next, salt);
-  await env.DB.prepare("UPDATE admin_credentials SET salt = ?, password_hash = ?, iterations = 210000, updated_at_ms = ? WHERE id = 1")
+  await env.DB.prepare("UPDATE admin_credentials SET salt = ?, password_hash = ?, iterations = 100000, updated_at_ms = ? WHERE id = 1")
     .bind(bytesToHex(salt), hash, Date.now()).run();
   await env.DB.prepare("DELETE FROM admin_sessions").run();
   return json({ passwordChanged: true, reLoginRequired: true });
