@@ -41,7 +41,7 @@ android {
         buildConfigField("String", "HAMED_API_AUDIENCE", "\"https://hamed-smart-delivery-api\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["auth0Domain"] = "dev-sm0yv5i1vy4kqhz8.us.auth0.com"
-        manifestPlaceholders["auth0Scheme"] = "https"
+        manifestPlaceholders["auth0Scheme"] = "com.hamed.smartdelivery.auth0"
     }
     signingConfigs {
         if (hasHamedReleaseKey) {
