@@ -117,3 +117,12 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - No Cloudflare API token value was requested or stored.
 - No Cloudflare Worker or D1 resource was created or changed.
 - Next: guide the user through creating an Auth0 tenant (if not already created), then a Native Application and API; collect only the public tenant domain and API audience.
+
+
+### 2026-11-28 — Auth0 Native Application created by user
+- User reports successful creation of Auth0 application "Hamed Smart Delivery Android" with application type Native.
+- Public Client ID supplied by user: rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
+- Client ID is public application metadata; no client secret, access token, or password was requested or recorded.
+- Tenant domain is still pending. No callback/logout URLs or API audience have been configured.
+- No Auth0 settings were changed by the assistant.
+- Next: obtain the tenant Domain from the Auth0 application Settings page; then inspect the Android package/application ID in the repository before defining callback and logout URLs. After that, agree on the API Identifier/Audience before creating the Auth0 API.
