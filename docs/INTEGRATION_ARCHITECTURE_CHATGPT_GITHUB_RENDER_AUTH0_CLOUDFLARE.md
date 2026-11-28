@@ -271,3 +271,14 @@ Auth0 is used for driver identity authentication. Administrative authorization i
 - Added a manual-only Cloudflare deployment workflow. It is designed to locate or create only the dedicated `hamed-smart-delivery-accounts` D1 database, apply the checked-in migration, and deploy the Worker. It uses the user-reported `CLOUDFLARE_API_TOKEN` secret and the user's supplied Account ID. The workflow has not been triggered and no Cloudflare resource has been created.
 - Updated `docs/EXECUTION_HANDOFF_20261128_AR.md` with current branch, changes, commit history, unimplemented items, required user actions, and resume commands.
 - External blockers still open: (1) secure first-time Admin device enrollment approval; (2) Auth0 Management API M2M application and least-privilege credentials; (3) confirmation/configuration of an Auth0 database connection that supports username/password; (4) manual Cloudflare workflow execution and verification; (5) offline 30-minute signed authorization. No Render service, Riyadh database, or `main` branch was changed.
+
+
+## سجل متابعة التنفيذ — 2026-11-28 (تحقق البناء وCloudflare)
+- إصلاح compileSdk إلى 36 في تطبيق السائق وتطبيق الإدارة بسبب متطلب androidx.browser 1.10.0.
+- تثبيت إصدار منشور من @cloudflare/workers-types، وتصحيح خطوة اكتشاف/إنشاء D1 باستخدام Cloudflare REST API بدلاً من خيار Wrangler غير المدعوم.
+- تحقق نجاح npm install وTypeScript typecheck، وإنشاء D1 باسم hamed-smart-delivery-accounts وتطبيق migration 0001_initial_accounts.sql بنجاح.
+- لم ينجح نشر Worker لأن الحساب لم يسجل workers.dev subdomain بعد. يتطلب ذلك خطوة onboarding في لوحة Cloudflare أو توفير route على نطاق مملوك.
+- Android CI: نجح بناء debug APK واختبارات unit والتحقق من توقيع debug؛ اختبار المحاكي كان جارياً، وAPK release الدائم لم ينتج لعدم توفر مفاتيح توقيع 0.4.3.
+- Build Hamed Smart Delivery Apps كان لا يزال ينفذ build لكل من السائق والإدارة وقت التوثيق؛ لم يتم تأكيد نجاح APK الإدارة.
+- تم توثيق طلب اعتماد حساب الإدارة الأولي Hamed / hamed1234 مع حفظ الجلسة بعد أول دخول. لم توضع كلمة المرور في Git أو APK. واجهة الإدارة وAPI المصادقة/إدارة السائقين لم تكتمل بعد.
+- لا يوجد تغيير على main أو خدمات Render أو قاعدة الرياض. لم يتم إعلان الاكتمال أو توفير روابط APK نهائية.
