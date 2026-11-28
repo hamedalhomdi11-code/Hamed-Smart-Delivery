@@ -1,0 +1,43 @@
+name: Build Hamed Smart Delivery Apps
+on:
+  push:
+    branches:
+      - feature/implementation-4-5-6-integration-20261128
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hamed-smart-delivery-android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK components
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Test driver app and build both APKs
+        run: |
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :admin:assembleDebug
+      - name: Upload driver APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamed-smart-delivery-driver-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Upload Admin APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hamed-smart-delivery-admin-debug
+          path: admin/build/outputs/apk/debug/admin-debug.apk
+          if-no-files-found: error
