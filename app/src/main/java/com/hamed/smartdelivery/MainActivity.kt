@@ -787,14 +787,24 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     val location = gpsMotionFilter.filter(rawLocation) ?: return
                     val rawPoint = LatLng(location.latitude, location.longitude)
                     val routeMatch = RouteGeometryMatcher.match(rawPoint, latestRoutePoints, monotonicRouteProgress, if (location.hasBearing()) location.bearing.toDouble() else null, location.speed.toDouble())
-                    val confidentlyMatched = routeMatch?.takeIf { it.crossTrackMeters <= 45.0 }
-                    if (confidentlyMatched != null) {
-                        monotonicRouteProgress = maxOf(monotonicRouteProgress, confidentlyMatched.progressMeters)
-                        if (monotonicRouteProgress - lastProgressDrawn >= 1.5) {
+                    // Keep progress rendering active in SEARCHING as well as ORDER_RECEIVED.
+                    // The previous 45 m-only snap gate was too strict for normal urban GPS drift,
+                    // so the completed (grey) section could remain at zero for the whole search.
+                    val routeAccuracyMeters = if (location.hasAccuracy()) location.accuracy.toDouble() else 35.0
+                    val progressMatch = routeMatch?.takeIf {
+                        routeAccuracyMeters <= 85.0 &&
+                            it.crossTrackMeters <= maxOf(70.0, routeAccuracyMeters * 1.5)
+                    }
+                    if (progressMatch != null) {
+                        monotonicRouteProgress = maxOf(monotonicRouteProgress, progressMatch.progressMeters)
+                        if (monotonicRouteProgress - lastProgressDrawn >= 0.5 || lastProgressDrawn < 0.0) {
                             drawRouteProgress(latestRoutePoints, monotonicRouteProgress)
                             lastProgressDrawn = monotonicRouteProgress
                         }
                     }
+                    // Use the stricter snap for the vehicle marker; route progress has its own
+                    // accuracy-aware tolerance so marker placement and progress do not interfere.
+                    val confidentlyMatched = routeMatch?.takeIf { it.crossTrackMeters <= 45.0 }
                     val point = confidentlyMatched?.takeIf { it.crossTrackMeters <= 35.0 }?.snappedPoint ?: rawPoint
                     latestUserLocation = Location(location)
                     // A manual pan pauses follow only temporarily; resume it automatically on movement.
