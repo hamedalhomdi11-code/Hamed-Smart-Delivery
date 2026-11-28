@@ -1,0 +1,14 @@
+name = "hamed-smart-delivery-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-28"
+workers_dev = true
+
+[vars]
+AUTH0_DOMAIN = "dev-sm0yv5i1vy4kqhz8.us.auth0.com"
+AUTH0_AUDIENCE = "https://hamed-smart-delivery-api"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hamed-smart-delivery-accounts"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
