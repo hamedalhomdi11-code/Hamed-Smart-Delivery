@@ -177,3 +177,15 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - The user's URL is consistent with the SDK format and matches the verified applicationId. It has not yet been tested end-to-end on a device.
 - No Android source, Gradle configuration, Auth0 dashboard settings, Cloudflare resources, Render services, or production data were modified in this step.
 - Next: add the Auth0.Android dependency and matching manifest placeholders/resources on a dedicated code branch; then implement the login/session flow only after aligning it with Architecture 6 and testing callback handling. Do not merge to main or build an APK without user approval.
+
+
+### 2026-11-28 — Auth0 Android SDK groundwork committed on isolated feature branch
+- Created code branch feature/auth0-native-sdk-setup-20261128 from main; main was not modified.
+- Added Auth0.Android 4.3.1 dependency to app/build.gradle.kts.
+- Added SDK manifest placeholders auth0Domain=@string/com_auth0_domain and auth0Scheme=https, matching the user's saved HTTPS callback/logout URI and the current Auth0.Android README.
+- Added app/src/main/res/values/auth0.xml containing only the public Auth0 tenant domain and Native application Client ID. No client secret or token is present.
+- The current Auth0.Android SDK declares its redirect activity/intent filter internally; no manual redirect activity was added to the app manifest.
+- Existing project settings satisfy SDK requirements: minSdk 26 and Java 17. Existing Android CI is configured to run only on pushes to main/develop, PRs targeting main, or manual dispatch; this feature-branch push did not request a build. No APK build was initiated by this work.
+- No login screen, credential persistence, API calls, account authorization, D1/Worker integration, or offline session logic has been implemented yet. These must align with Architecture 6 and be tested before use.
+- No merge, deployment, Render change, Cloudflare resource change, or production database change was performed.
+- Next: inspect the existing UI/navigation and Architecture 6 decisions to design the first-login gate and secure token/session lifecycle; implement that separately after unresolved Architecture 6 decisions are settled. User approval is still required before any APK build or merge.
