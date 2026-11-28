@@ -37,7 +37,8 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - User reports a Cloudflare account and API token were created.
 - User reports the token is stored in GitHub repository secret CLOUDFLARE_API_TOKEN.
 - Token value is never requested, displayed, or stored in this document.
-- Worker, D1 database, account ID, zone configuration, and deployment status are not yet verified.
+- Cloudflare Account ID supplied by user: f60cd95ac4221dd7b1ba6ec535f46f4c.
+- Worker and D1 database creation/deployment status are not yet verified.
 - No Cloudflare resource has been created, modified, or deployed as part of this integration.
 
 ## 4. Target architecture
@@ -110,3 +111,9 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - GitHub: created this unnumbered architecture document at docs/INTEGRATION_ARCHITECTURE_CHATGPT_GITHUB_RENDER_AUTH0_CLOUDFLARE.md on that branch; commit 6ff52456455c6ab6e7f8f45eac60ebfeba0641ac.
 - Boundary: Hamed Maps services and Riyadh database remain out of scope and untouched.
 - Next: verify remaining repository workflow/configuration inventory, then prepare a validation-only Cloudflare workflow. Auth0 metadata and Cloudflare non-secret account/resource IDs are still required. No deployment, merge, or paid resource creation has been performed or authorized.
+
+### 2026-11-28 — Cloudflare account identifier received
+- User supplied the Cloudflare Account ID; recorded above as non-secret configuration metadata.
+- No Cloudflare API token value was requested or stored.
+- No Cloudflare Worker or D1 resource was created or changed.
+- Next: guide the user through creating an Auth0 tenant (if not already created), then a Native Application and API; collect only the public tenant domain and API audience.
