@@ -225,13 +225,19 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     }
     var trackingActive by remember { mutableStateOf(gpsPrefs.getBoolean(LocationTrackingService.KEY_ACTIVE, false)) }
     var gpsMode by remember { mutableStateOf(if (trackingActive) GpsMode.TRACKING else GpsMode.STOPPED) }
+    var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action == LocationTrackingService.ACTION_TRACKING_STATE) {
                     val active = intent.getBooleanExtra(LocationTrackingService.EXTRA_TRACKING_ACTIVE, false)
+                    val failure = intent.getStringExtra(LocationTrackingService.EXTRA_TRACKING_ERROR)
                     trackingActive = active
                     gpsMode = if (active) GpsMode.TRACKING else GpsMode.STOPPED
+                    if (!active && !failure.isNullOrBlank()) {
+                        pendingSearchAfterPermission = false
+                        android.widget.Toast.makeText(context, failure, android.widget.Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }
@@ -323,7 +329,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             welcomeAnnounced = true
         }
     }
-    var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
