@@ -32,12 +32,12 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 ### Auth0
 - User created an Auth0 tenant/account.
 - Tenant domain: dev-sm0yv5i1vy4kqhz8.us.auth0.com.
-- Native Android application: Hamed Smart Delivery Android.
+- Native Android application: My AppHamed Smart Delivery Android (exact display name corrected by user).
 - Public Client ID: rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
 - Android applicationId verified from app/build.gradle.kts: com.hamed.smartdelivery.
 - Auth0 API created by user: Hamed Smart Delivery API; Identifier/Audience: https://hamed-smart-delivery-api; Auth0 API ID: 6b0a4d86b566fe33a405f7c6.
 - User-provided API settings page shows maximum access-token lifetime 86400 seconds and implicit/hybrid lifetime 7200 seconds. User explicitly confirmed that the API's JWT signing algorithm is set to RS256.
-- Callback/logout URLs and API permissions/RBAC policy are not yet configured or verified.
+- User confirmed the HTTPS callback/logout URI was saved in both Allowed Callback URLs and Allowed Logout URLs; end-to-end redirect is not yet device-tested. API permissions/RBAC policy still require review.
 - No client secret is needed in the Android native application; use Authorization Code + PKCE.
 ### Cloudflare
 - User reports a Cloudflare account and API token were created.
@@ -66,7 +66,7 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Auth0 mobile client is public/native and uses PKCE; do not create a client secret for the Android APK.
 - Worker API must validate JWT cryptographically and enforce issuer, audience, expiry, subject, scopes/roles, account state, and rate limits.
 - D1 schema changes require migrations, backups/export strategy, and explicit approval before touching any existing production database.
-- All administrative changes are authenticated, authorized, audited, and revocable.
+- All administrative changes must be authorized, audited, and revocable. The Admin app has no interactive username/password login screen by explicit user decision; this does NOT authorize exposing privileged Worker endpoints without protection. A secure, non-password interactive trust mechanism (for example, enrolled-device credential protected by Android Keystore and optionally device biometrics) must be designed and approved before admin API implementation. Until then, admin operations remain blocked from production.
 - No production deployment until tests, configuration review, cost review, and user approval.
 
 ## 6. Staged implementation plan
@@ -189,3 +189,47 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - No login screen, credential persistence, API calls, account authorization, D1/Worker integration, or offline session logic has been implemented yet. These must align with Architecture 6 and be tested before use.
 - No merge, deployment, Render change, Cloudflare resource change, or production database change was performed.
 - Next: inspect the existing UI/navigation and Architecture 6 decisions to design the first-login gate and secure token/session lifecycle; implement that separately after unresolved Architecture 6 decisions are settled. User approval is still required before any APK build or merge.
+
+
+## 9. Two-application product architecture — user-confirmed decision (2026-11-28)
+### 9.1 Separate Android applications
+The product consists of two distinct applications with separate responsibilities:
+1. **Hamed Smart Delivery** — the driver application. Drivers use this app to access delivery work, maps, tracking, clustering, and navigation. It requires an individual driver account and successful authentication/authorization before access.
+2. **Hamed Smart Delivery Admin** — the administration application. It is used only by the owner/authorized administration to create driver accounts, set or reset passwords, set validity periods, extend or shorten validity, disable/reactivate accounts, and inspect account status/expiry. It is not a driver self-service app.
+
+### 9.2 Administrative authority
+- Only the owner/authorized administration may create driver accounts.
+- Drivers cannot self-register, create accounts, change/reset their own passwords through the Admin app, extend their own validity, or change their account status/role.
+- Account administration actions are performed through the central backend; the backend is the source of truth and records an audit trail.
+- The driver app must enforce the backend account state and validity using server time. A client-side clock or local flag must never extend account validity.
+- The account duration selector must support at least: 1 day, 2 days, 3 days, 4 days, 1 week, and 1 calendar month. The chosen duration is converted by the backend into explicit validity start/end timestamps. “One month” means a calendar month, not a fixed 30 days, unless the user later specifies otherwise.
+- On expiry or administrative disablement, the driver must be denied a new login/session and new work. Existing offline/session handling remains governed by Architecture 6 and must not silently extend expiry.
+
+### 9.3 Admin app opening behavior — explicit user decision
+- The Admin app itself opens directly without an in-app login screen, username, or password. This is an explicit product requirement confirmed by the user on 2026-11-28.
+- This requirement applies to the app's opening experience; it does not make the administrative API public or remove the need to protect privileged operations.
+- **Security blocker before implementation:** an app with no login screen and unrestricted admin API access would allow anyone who obtains the app/device to create accounts, reset passwords, or extend driver access. Therefore, the backend must not accept anonymous administrative requests.
+- The implementation must preserve the no-login-screen requirement while a separate trusted-admin authorization method is designed (for example, a pre-enrolled owner device with a device-bound credential stored in Android Keystore, with optional OS biometric/device authentication). This is a proposal, not yet an approved final mechanism. Do not implement or deploy privileged Admin endpoints until the user approves the trust mechanism.
+- If the user intends absolutely no authentication, device trust, biometric/device lock, or other authorization of any kind for administrative actions, that creates a critical security exposure and must be explicitly revisited before production.
+
+### 9.4 Relationship between the applications and backend
+Admin app -> protected administrative API on Cloudflare Worker -> D1 account records / audit log.
+Driver app -> Auth0 authentication (Native Authorization Code + PKCE) -> Cloudflare Worker validates token and checks D1 account status/validity -> allow or deny driver access.
+Auth0 is used for driver identity authentication. Administrative authorization is a separate privileged capability and must not be inferred from possession of a driver account or a public mobile Client ID.
+
+### 9.5 Scope and implementation status
+- This section records product and access-policy decisions only.
+- No Admin Android application has been created yet.
+- No Admin API, D1 schema, Worker route, admin device enrollment, or admin authorization method has been implemented or deployed.
+- No driver self-registration or driver self-service password-management feature is authorized.
+- This decision does not authorize changes to main, production services, existing databases, or APK builds.
+
+## 10. Activity Log
+### 2026-11-28 — Two-application model and Admin app opening policy confirmed
+- User confirmed the product will have two separate apps: Hamed Smart Delivery for drivers and Hamed Smart Delivery Admin for account administration.
+- User confirmed only the owner/administration may create driver accounts and manage passwords, account validity, extensions, disablement, and reactivation. Drivers have no self-registration or self-administration privileges.
+- User explicitly decided that the Admin app opens without an in-app login screen, username, or password. Driver authentication remains required in Hamed Smart Delivery.
+- Recorded the required validity presets: 1, 2, 3, 4 days, 1 week, and 1 calendar month; backend/server time remains authoritative.
+- Security boundary recorded: the no-login-screen requirement must not result in anonymous privileged backend endpoints. A device-bound trusted-admin authorization approach is proposed for later approval; no final mechanism is selected or implemented.
+- Documentation-only change on the existing integration architecture branch. No Android app, Worker, D1, Auth0 dashboard, Cloudflare resource, Render service, or production data was changed. No merge, deployment, or APK build was performed.
+- Next: settle the trusted-admin authorization mechanism and remaining Architecture 6 account/session decisions before implementing Admin app/backend privileges.
