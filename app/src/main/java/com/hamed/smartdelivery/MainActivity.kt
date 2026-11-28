@@ -515,7 +515,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                                 DriverCommand.OrderReceived -> {
                                     clusterWaitStartedAt = null
                                     selectedCluster?.let { cluster ->
-                                        runCatching { OrderClusterDatabase(context).recordOrder(cluster) }
+                                        runCatching {
+                                            val orderDatabase = OrderClusterDatabase(context)
+                                            try { orderDatabase.recordOrder(cluster) } finally { orderDatabase.close() }
+                                        }
                                         orderProducingClusterIds = orderProducingClusterIds + clusterStableId(cluster)
                                     }
                                 }
