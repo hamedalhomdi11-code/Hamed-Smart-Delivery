@@ -5,12 +5,17 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.graphics.Color as AndroidColor
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.os.Looper
 import android.os.SystemClock
 import android.os.Build
@@ -64,6 +69,7 @@ import androidx.core.content.ContextCompat
 import org.maplibre.android.MapLibre
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.annotations.PolylineOptions
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -76,6 +82,8 @@ import com.hamed.smartdelivery.domain.DriverReducer
 import com.hamed.smartdelivery.domain.DriverSnapshot
 import com.hamed.smartdelivery.domain.GpsMode
 import com.hamed.smartdelivery.domain.ClusterPolicy
+
+private var workSessionInitialized = false
 
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
@@ -136,6 +144,19 @@ private fun readPersistedExclusions(prefs: android.content.SharedPreferences): M
         }
     }.toMap()
 
+private fun playStatusTone(context: Context, volume: Float, kind: String) {
+    runCatching {
+        val (toneType, durationMs) = when (kind) {
+            "welcome" -> ToneGenerator.TONE_PROP_BEEP to 240
+            "success" -> ToneGenerator.TONE_PROP_ACK to 420
+            else -> ToneGenerator.TONE_PROP_NACK to 520
+        }
+        val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, (volume * 100f).roundToInt().coerceIn(0, 100))
+        tone.startTone(toneType, durationMs)
+        Handler(Looper.getMainLooper()).postDelayed({ tone.release() }, durationMs + 150L)
+    }
+}
+
 private fun alertRouteChanged(context: Context, soundEnabled: Boolean, vibrationEnabled: Boolean) {
     if (vibrationEnabled) runCatching {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -191,46 +212,96 @@ class MainActivity : ComponentActivity() {
 fun HamedApp(initialDestination: DeliveryDestination? = null) {
     val context = LocalContext.current
     val workflowPrefs = remember { context.getSharedPreferences("workflow_state", Context.MODE_PRIVATE) }
+    val gpsPrefs = remember { context.getSharedPreferences(LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE) }
     var announcementsEnabled by remember { mutableStateOf(workflowPrefs.getBoolean("announcements_enabled", true)) }
     var announcementVolume by remember { mutableFloatStateOf(workflowPrefs.getFloat("announcement_volume", 0.85f).coerceIn(0f, 1f)) }
+    var taskReminderIntervalMinutes by remember { mutableIntStateOf(workflowPrefs.getInt("task_reminder_interval_minutes", 3).coerceIn(1, 10)) }
+    var english by remember { mutableStateOf(workflowPrefs.getBoolean("english", false)) }
     var speechReady by remember { mutableStateOf(false) }
     val announcementsSpeech = remember(context) { TextToSpeech(context) { status -> speechReady = status == TextToSpeech.SUCCESS } }
-    LaunchedEffect(speechReady) { if (speechReady) announcementsSpeech.language = Locale("ar", "SA") }
+    LaunchedEffect(speechReady, english) {
+        if (speechReady) announcementsSpeech.language = if (english) Locale.US else Locale("ar", "SA")
+    }
     DisposableEffect(announcementsSpeech) { onDispose { announcementsSpeech.stop(); announcementsSpeech.shutdown() } }
-    fun announceArabic(message: String) {
-        if (announcementsEnabled && speechReady && message.isNotBlank()) {
+    fun announceArabic(message: String, englishOverride: String? = null) {
+        val spoken = if (!english) message else englishOverride ?: when (message) {
+            "مبروك إتمام المهمة بنجاح. حان الوقت للبحث عن الطلبات، جاري البحث" -> "Delivery completed successfully. Searching for new orders."
+            "حامد سمارت دليفري يتمنى لكم يوماً مليئاً بالأرباح والطلبات. حان الوقت للبحث عن الطلبات، جاري البحث" -> "Hamed Smart Delivery wishes you a profitable day. Searching for orders."
+            "تم استلام الطلب. توقف البحث مؤقتاً" -> "Order received. Order search is paused."
+            "اكتملت المهمة. يمكنك بدء البحث عن طلب جديد" -> "The delivery is complete. You can start searching for another order."
+            "تم تفعيل وضع الأمان" -> "Safety mode is enabled."
+            "بدأ مؤقت انتظار التجمع لمدة خمس دقائق" -> "The five-minute cluster waiting timer has started."
+            "هل انتهيت من توصيل طلبك؟ إذا انتهيت، يرجى الضغط على زر انتهاء المهمة" -> "Have you completed the delivery? If so, tap Complete Delivery."
+            "مرحباً بك في حامد سمارت دليفري" -> "Welcome to Hamed Smart Delivery."
+            "تم تغيير المسار. يرجى التوجه إلى التجمع الجديد عبر المسار الجديد" -> "The route has changed. Follow the updated route to the new cluster."
+            "انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر" -> "Five minutes passed without an order. This cluster is excluded for fifteen minutes while another is selected."
+            "تم استبعاد التجمع السابق لمدة عشر دقائق. يجري البحث عن التجمع التالي" -> "The previous cluster is excluded for ten minutes. Searching for the next cluster."
+            "هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري" -> "This is a test of Hamed Smart Delivery voice guidance."
+            "انتهى وقت العمل. يمكنك بدء البحث عن الطلبات من جديد." -> "The work session has ended. You can start searching for orders again."
+            else -> message
+        }
+        if (announcementsEnabled && speechReady && spoken.isNotBlank()) {
+            announcementsSpeech.language = if (english) Locale.US else Locale("ar", "SA")
             announcementsSpeech.setSpeechRate(1.0f)
-            announcementsSpeech.speak(message, TextToSpeech.QUEUE_FLUSH,
+            announcementsSpeech.speak(spoken, TextToSpeech.QUEUE_FLUSH,
                 android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, announcementVolume) },
                 "hamed-event")
         }
     }
     val restoredDriverMode = remember {
-        val savedMode = runCatching {
-            DriverMode.valueOf(workflowPrefs.getString("driver_mode", DriverMode.IDLE.name)!!)
-        }.getOrDefault(DriverMode.IDLE)
-        // A previously active search cannot be resumed without a verified location session.
-        if (savedMode == DriverMode.SEARCHING) DriverMode.IDLE else savedMode
+        if (!workSessionInitialized) {
+            workflowPrefs.edit().remove("driver_mode").remove("last_command_id")
+                .remove("cluster_wait_started_at").remove("temporary_exclusions").apply()
+            writePersistedCluster(workflowPrefs, null)
+            workSessionInitialized = true
+        }
+        DriverMode.IDLE
     }
     var driverSnapshot by remember {
         mutableStateOf(DriverSnapshot(restoredDriverMode, workflowPrefs.getString("last_command_id", null)))
     }
-    var trackingActive by remember { mutableStateOf(false) }
-    var gpsMode by remember { mutableStateOf(GpsMode.STOPPED) }
+    var trackingActive by remember { mutableStateOf(gpsPrefs.getBoolean(LocationTrackingService.KEY_ACTIVE, false)) }
+    var gpsMode by remember { mutableStateOf(if (trackingActive) GpsMode.TRACKING else GpsMode.STOPPED) }
+    var pendingSearchAfterPermission by remember { mutableStateOf(false) }
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == LocationTrackingService.ACTION_TRACKING_STATE) {
+                    val active = intent.getBooleanExtra(LocationTrackingService.EXTRA_TRACKING_ACTIVE, false)
+                    val failure = intent.getStringExtra(LocationTrackingService.EXTRA_TRACKING_ERROR)
+                    trackingActive = active
+                    gpsMode = if (active) GpsMode.TRACKING else GpsMode.STOPPED
+                    if (!active && !failure.isNullOrBlank()) {
+                        pendingSearchAfterPermission = false
+                        if (announcementsEnabled) playStatusTone(context, announcementVolume, "error")
+                        android.widget.Toast.makeText(context, failure, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(LocationTrackingService.ACTION_TRACKING_STATE), ContextCompat.RECEIVER_NOT_EXPORTED)
+        // The service may have started before this receiver was registered (cold launch).
+        // Reconcile UI state with the service's persisted state immediately after registration.
+        val activeNow = context.getSharedPreferences(LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .getBoolean(LocationTrackingService.KEY_ACTIVE, false)
+        trackingActive = activeNow
+        gpsMode = if (activeNow) GpsMode.TRACKING else GpsMode.STOPPED
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     var perspective3D by remember { mutableStateOf(workflowPrefs.getBoolean("perspective_3d", true)) }
-    var english by remember { mutableStateOf(workflowPrefs.getBoolean("english", false))}
     val uiStatePrefs = remember { context.getSharedPreferences("ui_state", Context.MODE_PRIVATE) }
-    var selected by remember { mutableIntStateOf(uiStatePrefs.getInt("selected_tab", 0).coerceIn(0, 3)) }
+    var selected by remember { mutableIntStateOf(0) }
     var mapExpanded by remember { mutableStateOf(false) }
 
     // Keep the last top-level page across process restarts without persisting live location data.
     LaunchedEffect(selected) {
         uiStatePrefs.edit().putInt("selected_tab", selected).apply()
     }
-    var searchRequestId by remember { mutableIntStateOf(if (restoredDriverMode == DriverMode.SEARCHING) 1 else 0) }
+    var searchRequestId by remember { mutableIntStateOf(0) }
     var manualSwitchRequestId by remember { mutableIntStateOf(0) }
-    var selectedCluster by remember { mutableStateOf(readPersistedCluster(workflowPrefs)) }
-    var excludedClusters by remember { mutableStateOf(readPersistedExclusions(workflowPrefs)) }
+    var recenterRequestId by remember { mutableIntStateOf(0) }
+    var selectedCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
+    var excludedClusters by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
     val clusterPrefs = remember { context.getSharedPreferences("cluster_visit_history", Context.MODE_PRIVATE) }
     var visitedClusterIds by remember { mutableStateOf(clusterPrefs.getString("visited_ids", "").orEmpty().split('|').filter { it.isNotBlank() }) }
     var orderProducingClusterIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -251,7 +322,10 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     LaunchedEffect(driverSnapshot.mode) {
         if (driverSnapshot.mode != previousDriverMode) {
             when (driverSnapshot.mode) {
-                DriverMode.SEARCHING -> announceArabic("بدأ البحث عن الطلبات")
+                DriverMode.SEARCHING -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) {
+                    if (announcementsEnabled) playStatusTone(context, announcementVolume, "success")
+                    announceArabic("مبروك إتمام المهمة بنجاح. حان الوقت للبحث عن الطلبات، جاري البحث")
+                } else announceArabic("حامد سمارت دليفري يتمنى لكم يوماً مليئاً بالأرباح والطلبات. حان الوقت للبحث عن الطلبات، جاري البحث")
                 DriverMode.ORDER_RECEIVED -> announceArabic("تم استلام الطلب. توقف البحث مؤقتاً")
                 DriverMode.IDLE -> if (previousDriverMode == DriverMode.ORDER_RECEIVED) announceArabic("اكتملت المهمة. يمكنك بدء البحث عن طلب جديد")
                 DriverMode.SAFE_MODE -> announceArabic("تم تفعيل وضع الأمان")
@@ -259,19 +333,19 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             previousDriverMode = driverSnapshot.mode
         }
     }
-    var previousSearchRequestId by remember { mutableIntStateOf(searchRequestId) }
-    var previousSearchMode by remember { mutableStateOf(driverSnapshot.mode) }
-    LaunchedEffect(searchRequestId, driverSnapshot.mode) {
-        if (searchRequestId > previousSearchRequestId &&
-            driverSnapshot.mode == DriverMode.SEARCHING && previousSearchMode == DriverMode.SEARCHING) {
-            announceArabic("تم تغيير التجمع. يجري البحث عن التجمع التالي")
-        }
-        previousSearchRequestId = searchRequestId
-        previousSearchMode = driverSnapshot.mode
-    }
     LaunchedEffect(clusterWaitStartedAt) {
         if (clusterWaitStartedAt != null && driverSnapshot.mode == DriverMode.SEARCHING)
             announceArabic("بدأ مؤقت انتظار التجمع لمدة خمس دقائق")
+    }
+    LaunchedEffect(driverSnapshot.mode, announcementsEnabled, taskReminderIntervalMinutes) {
+        if (driverSnapshot.mode == DriverMode.ORDER_RECEIVED && announcementsEnabled) {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                delay(taskReminderIntervalMinutes * 60_000L)
+                if (driverSnapshot.mode == DriverMode.ORDER_RECEIVED && announcementsEnabled) {
+                    announceArabic("هل انتهيت من توصيل طلبك؟ إذا انتهيت، يرجى الضغط على زر انتهاء المهمة")
+                }
+            }
+        }
     }
     LaunchedEffect(selectedCluster) { writePersistedCluster(workflowPrefs, selectedCluster) }
     LaunchedEffect(excludedClusters) {
@@ -291,21 +365,11 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
     var welcomeAnnounced by remember { mutableStateOf(false) }
     LaunchedEffect(speechReady, announcementsEnabled) {
         if (speechReady && announcementsEnabled && !welcomeAnnounced) {
+            playStatusTone(context, announcementVolume, "welcome")
             announceArabic("مرحباً بك في حامد سمارت دليفري")
             welcomeAnnounced = true
         }
     }
-    var timerEndAnnouncedAt by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(waitRemainingSeconds, clusterWaitStartedAt, driverSnapshot.mode) {
-        val startedAt = clusterWaitStartedAt
-        if (startedAt != null && driverSnapshot.mode == DriverMode.SEARCHING &&
-            waitRemainingSeconds == 0 && System.currentTimeMillis() >= startedAt + 5 * 60 * 1000L &&
-            timerEndAnnouncedAt != startedAt) {
-            announceArabic("انتهى مؤقت التجمع. يجري الانتقال للبحث عن تجمع آخر")
-            timerEndAnnouncedAt = startedAt
-        }
-    }
-    var pendingSearchAfterPermission by remember { mutableStateOf(false) }
     var hasLocationPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -319,16 +383,48 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            trackingActive = true
-            gpsMode = GpsMode.TRACKING
-            if (pendingSearchAfterPermission) {
-                searchRequestId += 1
+
+        } else {
+            pendingSearchAfterPermission = false
+        }
+    }
+    val requestLocationPermissions: () -> Unit = {
+        locationPermissionLauncher.launch(arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.POST_NOTIFICATIONS
+        ))
+    }
+    // Do not mark the driver as searching until the foreground GPS service confirms it is active.
+    LaunchedEffect(pendingSearchAfterPermission, gpsMode, hasLocationPermission) {
+        if (pendingSearchAfterPermission && hasLocationPermission) {
+            if (gpsMode == GpsMode.TRACKING) {
+                val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.StartSearch)
+                if (transition.accepted) {
+                    driverSnapshot = transition.snapshot
+                    searchRequestId += 1
+                }
                 pendingSearchAfterPermission = false
+            } else {
+                delay(15_000L)
+                if (pendingSearchAfterPermission && gpsMode == GpsMode.STOPPED) {
+                    pendingSearchAfterPermission = false
+                    android.widget.Toast.makeText(
+                        context,
+                        "لم تبدأ خدمة GPS. تحقق من تفعيل الموقع ومنح صلاحياته ثم حاول مجدداً.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
     }
-    // Safe build profile: location tracking and live navigation are disabled.
-    val requestLocationPermissions: () -> Unit = { }
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            requestLocationPermissions()
+        } else {
+            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+        }
+    }
     LaunchedEffect(Unit) {
         val database = OrderClusterDatabase(context)
         orderProducingClusterIds = withContext(Dispatchers.IO) {
@@ -347,20 +443,36 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
     }
-    // Location permission is intentionally not requested in this safe build profile.
+    // GPS permission is requested at launch; the foreground location service owns the live session.
     val title = if (english) "Hamed Smart Delivery" else "حامد سمارت دليفري"
     val toggleTracking: () -> Unit = {
         if (!hasLocationPermission) {
             requestLocationPermissions()
         } else {
-            if (gpsMode == GpsMode.STOPPED) {
-                ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-                gpsMode = GpsMode.TRACKING
-                trackingActive = true
-            } else {
-                context.stopService(Intent(context, LocationTrackingService::class.java))
-                gpsMode = GpsMode.STOPPED
-                trackingActive = false
+            // Read the service's persisted truth at click time instead of relying on a possibly
+            // one-frame-old Compose state while the foreground-service broadcast is in flight.
+            val activeNow = context.getSharedPreferences(
+                LocationTrackingService.PREFERENCES_NAME, Context.MODE_PRIVATE
+            ).getBoolean(LocationTrackingService.KEY_ACTIVE, trackingActive)
+            try {
+                if (activeNow) {
+                    context.startService(
+                        Intent(context, LocationTrackingService::class.java)
+                            .setAction(LocationTrackingService.ACTION_STOP)
+                    )
+                } else {
+                    ContextCompat.startForegroundService(
+                        context,
+                        Intent(context, LocationTrackingService::class.java)
+                            .setAction(LocationTrackingService.ACTION_START)
+                    )
+                }
+            } catch (error: Exception) {
+                android.widget.Toast.makeText(
+                    context,
+                    "تعذر تغيير حالة التتبع: ${error.localizedMessage ?: error.javaClass.simpleName}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -370,13 +482,15 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                 if (!mapExpanded) Header(title, english) { english = !english }
                 if (selected == 0) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, driverSnapshot.mode == DriverMode.SEARCHING, excludedClusters, visitedClusterIds, orderProducingClusterIds, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); clusterWaitStartedAt = null; searchRequestId += 1 })
+                        SmartMap(hasLocationPermission, initialDestination, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, recenterRequestId, driverSnapshot.mode == DriverMode.SEARCHING, clusterWaitStartedAt, selectedCluster?.let { clusterStableId(it) }, excludedClusters, visitedClusterIds, orderProducingClusterIds, onVoiceInstruction = { arabic, englishText -> announceArabic(arabic, englishText) }, onRouteChanged = { announceArabic("تم تغيير المسار. يرجى التوجه إلى التجمع الجديد عبر المسار الجديد") }, onClusterSelected = { selectedCluster = it }, onClusterEntered = { id -> if (visitedClusterIds.lastOrNull() != id) { visitedClusterIds = visitedClusterIds + id; clusterPrefs.edit().putString("visited_ids", visitedClusterIds.joinToString("|")).apply() }; if (clusterWaitStartedAt == null) clusterWaitStartedAt = System.currentTimeMillis() }, onAutoExclude = { id, until -> excludedClusters = excludedClusters + (id to until); selectedCluster = null; clusterWaitStartedAt = null; searchRequestId += 1; announceArabic("انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر") })
                         Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                             MiniMetric("GPS", if (trackingActive) if (english) "Tracking active" else "التتبع يعمل" else if (hasLocationPermission) if (english) "Ready" else "جاهز" else if (english) "Permission needed" else "بانتظار إذن الموقع", Icons.Rounded.GpsFixed)
                             MiniMetric(if (english) "Map" else "الخريطة", "MapLibre • OSM", Icons.Rounded.Map)
                         }
                         Column(Modifier.align(Alignment.TopEnd).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                            MapAction(Icons.Rounded.MyLocation, toggleTracking)
+                            // Keep GPS start/stop available directly on the map as well as in Profile.
+                            MapAction(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff) { toggleTracking() }
+                            MapAction(Icons.Rounded.MyLocation) { recenterRequestId += 1 }
                             MapAction(Icons.Rounded.Layers) { perspective3D = !perspective3D }
                             MapAction(if (mapExpanded) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen) { mapExpanded = !mapExpanded }
                         }
@@ -386,7 +500,17 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                         }
                     }
-                    if (!mapExpanded) Dashboard(driverSnapshot, english, waitRemainingSeconds, onManualSwitch = { selectedCluster?.let { cluster ->
+                    if (!mapExpanded) Dashboard(driverSnapshot, english, waitRemainingSeconds, onEndWork = {
+                        val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.EndWork)
+                        if (transition.accepted) {
+                            driverSnapshot = transition.snapshot
+                            selectedCluster = null
+                            clusterWaitStartedAt = null
+                            excludedClusters = emptyMap()
+                            searchRequestId += 1
+                            announceArabic("انتهى وقت العمل. يمكنك بدء البحث عن الطلبات من جديد.")
+                        }
+                    }, onManualSwitch = { selectedCluster?.let { cluster ->
                         val now = System.currentTimeMillis()
                         val exclusion = com.hamed.smartdelivery.domain.ClusterPolicy.manualSwitch(clusterStableId(cluster), now)
                         excludedClusters = excludedClusters + (exclusion.clusterId to exclusion.untilEpochMillis)
@@ -394,22 +518,40 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         clusterWaitStartedAt = null
                         manualSwitchRequestId += 1
                         searchRequestId += 1
+                        announceArabic("تم استبعاد التجمع السابق لمدة عشر دقائق. يجري البحث عن التجمع التالي")
                     } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
+                        val waitingForGps = command == DriverCommand.StartSearch &&
+                            (!hasLocationPermission || gpsMode == GpsMode.STOPPED)
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
                             requestLocationPermissions()
                         } else if (command == DriverCommand.StartSearch && gpsMode == GpsMode.STOPPED) {
-                            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-                            gpsMode = GpsMode.TRACKING
-                            trackingActive = true
+                            pendingSearchAfterPermission = true
+                            try {
+                                ContextCompat.startForegroundService(
+                                    context,
+                                    Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START)
+                                )
+                            } catch (error: Exception) {
+                                pendingSearchAfterPermission = false
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "تعذر تشغيل خدمة GPS: ${error.localizedMessage ?: error.javaClass.simpleName}",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }
-                        val transition = DriverReducer.reduce(driverSnapshot, command)
-                        if (transition.accepted) {
+                        if (!waitingForGps) {
+                            val transition = DriverReducer.reduce(driverSnapshot, command)
+                            if (transition.accepted) {
                             when (command) {
                                 DriverCommand.OrderReceived -> {
                                     clusterWaitStartedAt = null
                                     selectedCluster?.let { cluster ->
-                                        runCatching { OrderClusterDatabase(context).recordOrder(cluster) }
+                                        runCatching {
+                                            val orderDatabase = OrderClusterDatabase(context)
+                                            try { orderDatabase.recordOrder(cluster) } finally { orderDatabase.close() }
+                                        }
                                         orderProducingClusterIds = orderProducingClusterIds + clusterStableId(cluster)
                                     }
                                 }
@@ -422,6 +564,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                             driverSnapshot = transition.snapshot
                             if (command == DriverCommand.StartSearch && hasLocationPermission) searchRequestId += 1
+                            }
                         }
                     }
                 } else {
@@ -429,7 +572,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         when (selected) {
                             1 -> OrdersScreen(driverSnapshot, english)
                             2 -> PlacesScreen(english)
-                            else -> ProfileScreen(english, { english = !english }, trackingActive, toggleTracking, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() }, announcementsEnabled, { enabled -> announcementsEnabled = enabled; workflowPrefs.edit().putBoolean("announcements_enabled", enabled).apply() }, announcementVolume, { value -> announcementVolume = value.coerceIn(0f, 1f); workflowPrefs.edit().putFloat("announcement_volume", announcementVolume).apply() }, { announceArabic("هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري") })
+                            else -> ProfileScreen(english, { english = !english }, soundAlertsEnabled, vibrationAlertsEnabled, { enabled -> soundAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("sound", enabled).apply() }, { enabled -> vibrationAlertsEnabled = enabled; routeAlertPrefs.edit().putBoolean("vibration", enabled).apply() }, announcementsEnabled, { enabled -> announcementsEnabled = enabled; workflowPrefs.edit().putBoolean("announcements_enabled", enabled).apply() }, announcementVolume, { value -> announcementVolume = value.coerceIn(0f, 1f); workflowPrefs.edit().putFloat("announcement_volume", announcementVolume).apply() }, taskReminderIntervalMinutes, { value -> taskReminderIntervalMinutes = value.coerceIn(1, 10); workflowPrefs.edit().putInt("task_reminder_interval_minutes", taskReminderIntervalMinutes).apply() }, { announceArabic("هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري") })
                         }
                     }
                 }
@@ -445,34 +588,6 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             }
         }
     }
-}
-
-private fun openGoogleMaps(context: Context, destination: DeliveryDestination) {
-    val navigationUri = Uri.parse("google.navigation:q=${destination.latitude},${destination.longitude}&mode=d")
-    val googleMapsIntent = Intent(Intent.ACTION_VIEW, navigationUri).setPackage("com.google.android.apps.maps")
-    try {
-        context.startActivity(googleMapsIntent)
-    } catch (_: ActivityNotFoundException) {
-        val webUri = Uri.parse(
-            "https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving"
-        )
-        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
-    }
-}
-
-private fun navigationLookAhead(latitude: Double, longitude: Double, bearingDegrees: Double, distanceMeters: Double): LatLng {
-    val earthRadius = 6371000.0
-    val angular = distanceMeters / earthRadius
-    val bearing = Math.toRadians(bearingDegrees)
-    val lat1 = Math.toRadians(latitude)
-    val lon1 = Math.toRadians(longitude)
-    val lat2 = kotlin.math.asin(kotlin.math.sin(lat1) * kotlin.math.cos(angular) +
-        kotlin.math.cos(lat1) * kotlin.math.sin(angular) * kotlin.math.cos(bearing))
-    val lon2 = lon1 + kotlin.math.atan2(
-        kotlin.math.sin(bearing) * kotlin.math.sin(angular) * kotlin.math.cos(lat1),
-        kotlin.math.cos(angular) - kotlin.math.sin(lat1) * kotlin.math.sin(lat2)
-    )
-    return LatLng(Math.toDegrees(lat2), Math.toDegrees(lon2))
 }
 
 @Composable
@@ -493,7 +608,7 @@ private fun Header(title: String, english: Boolean, toggle: () -> Unit) {
 }
 
 @Composable
-private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, searchActive: Boolean, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
+private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestination?, trackingActive: Boolean, gpsMode: GpsMode, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, perspective3D: Boolean, searchRequestId: Int, manualSwitchRequestId: Int, recenterRequestId: Int, searchActive: Boolean, clusterWaitStartedAt: Long?, selectedClusterId: String?, excludedClusters: Map<String, Long>, visitedClusterIds: List<String>, orderProducingClusterIds: Set<String>, onVoiceInstruction: (String, String) -> Unit, onRouteChanged: () -> Unit, onClusterSelected: (RestaurantCluster) -> Unit, onClusterEntered: (String) -> Unit, onAutoExclude: (String, Long) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var activeDestination by remember(destination) { mutableStateOf(destination) }
@@ -501,33 +616,26 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleReady by remember { mutableStateOf(false) }
     var userMarker by remember { mutableStateOf<Marker?>(null) }
+    var followUserCamera by remember { mutableStateOf(true) }
+    var latestUserLocation by remember { mutableStateOf<Location?>(null) }
+    var lastArrowBearing by remember { mutableFloatStateOf(Float.NaN) }
     var displayedRoutePolyline by remember { mutableStateOf<org.maplibre.android.annotations.Polyline?>(null) }
-    val navigationActive = false
     var currentBearing by remember { mutableFloatStateOf(0f) }
     var routeStatus by remember(activeDestination) { mutableStateOf(if (activeDestination == null) "" else "جارٍ انتظار موقع GPS لحساب المسار") }
-    var nextTurnInstruction by remember(activeDestination) { mutableStateOf("") }
     var routePoints by remember(activeDestination) { mutableStateOf<List<LatLng>>(emptyList()) }
     var routeSteps by remember(activeDestination) { mutableStateOf<List<RouteStep>>(emptyList()) }
-    var currentStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
+    var spokenRouteStepIndex by remember(activeDestination) { mutableIntStateOf(0) }
     var routeRequested by remember(activeDestination) { mutableStateOf(false) }
-    var showMapProviderDialog by remember { mutableStateOf(false) }
-    var mapProviderNotice by remember { mutableStateOf("") }
     var currentCluster by remember { mutableStateOf<RestaurantCluster?>(null) }
-    var clusterEnteredAt by remember { mutableStateOf<Long?>(null) }
+    var clusterEnteredAt by remember(clusterWaitStartedAt, selectedClusterId) { mutableStateOf(clusterWaitStartedAt) }
     var autoSwitchTriggered by remember { mutableStateOf(false) }
-    var ttsReady by remember { mutableStateOf(false) }
-    val speech = remember(context) { TextToSpeech(context) { status -> ttsReady = status == TextToSpeech.SUCCESS } }
-    LaunchedEffect(ttsReady) {
-        if (ttsReady) speech.language = Locale("ar", "SA")
-    }
-    DisposableEffect(speech) {
-        onDispose { speech.stop(); speech.shutdown() }
-    }
-    LaunchedEffect(manualSwitchRequestId) {
-        if (manualSwitchRequestId > 0) {
+    LaunchedEffect(searchRequestId, manualSwitchRequestId) {
+        if (searchRequestId > 0 || manualSwitchRequestId > 0) {
             currentCluster = null
             clusterEnteredAt = null
             autoSwitchTriggered = false
+            routeSteps = emptyList()
+            spokenRouteStepIndex = 0
         }
     }
     val scope = rememberCoroutineScope()
@@ -556,6 +664,8 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         mapView.getMapAsync { map ->
             mapLibreMap = map
             map.setStyle("https://tiles.openfreemap.org/styles/liberty") {
+                // Offset the camera's usable center upward so the driver arrow sits lower on screen.
+                map.setPadding(0, (mapView.height * 0.38f).roundToInt().coerceAtLeast(0), 0, 0)
                 map.uiSettings.isAttributionEnabled = true
                 map.uiSettings.isLogoEnabled = true
                 map.cameraPosition = CameraPosition.Builder()
@@ -571,6 +681,31 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
+    DisposableEffect(mapLibreMap, styleReady) {
+        val map = mapLibreMap
+        if (map == null || !styleReady) onDispose { } else {
+            val cameraListener = MapLibreMap.OnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) followUserCamera = false
+            }
+            map.addOnCameraMoveStartedListener(cameraListener)
+            onDispose { map.removeOnCameraMoveStartedListener(cameraListener) }
+        }
+    }
+
+    LaunchedEffect(recenterRequestId, mapLibreMap, styleReady) {
+        val map = mapLibreMap
+        val location = latestUserLocation
+        if (recenterRequestId > 0 && map != null && styleReady && location != null) {
+            followUserCamera = true
+            map.animateCamera(
+                CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder().target(LatLng(location.latitude, location.longitude))
+                        .zoom(16.5).tilt(if (perspective3D) 58.0 else 0.0).build()
+                ), 650
+            )
+        }
+    }
+
     LaunchedEffect(mapLibreMap, styleReady, perspective3D) {
         if (styleReady) mapLibreMap?.let { map ->
             val current = map.cameraPosition
@@ -581,7 +716,32 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
         }
     }
 
-    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, trackingActive, gpsMode, soundAlertsEnabled, vibrationAlertsEnabled, perspective3D, searchRequestId, manualSwitchRequestId, searchActive, excludedClusters, visitedClusterIds, orderProducingClusterIds) {
+    LaunchedEffect(searchActive, currentCluster, clusterEnteredAt) {
+        val cluster = currentCluster
+        val enteredAt = clusterEnteredAt
+        if (!searchActive || cluster == null || enteredAt == null) return@LaunchedEffect
+        val id = clusterStableId(cluster)
+        val remaining = (ClusterPolicy.WAIT_MILLIS - (System.currentTimeMillis() - enteredAt)).coerceAtLeast(0L)
+        if (remaining > 0L) delay(remaining)
+        if (searchActive && currentCluster?.let { clusterStableId(it) } == id &&
+            clusterEnteredAt == enteredAt && !autoSwitchTriggered) {
+            autoSwitchTriggered = true
+            val now = System.currentTimeMillis()
+            onAutoExclude(id, ClusterPolicy.automaticTimeout(id, now).untilEpochMillis)
+        }
+    }
+
+    val latestExcludedClusters by rememberUpdatedState(excludedClusters)
+    val latestVisitedClusterIds by rememberUpdatedState(visitedClusterIds)
+    val latestOrderProducingClusterIds by rememberUpdatedState(orderProducingClusterIds)
+    val latestClusterWaitStartedAt by rememberUpdatedState(clusterWaitStartedAt)
+    val latestSelectedClusterId by rememberUpdatedState(selectedClusterId)
+    val latestTrackingActive by rememberUpdatedState(trackingActive)
+    val latestSoundAlertsEnabled by rememberUpdatedState(soundAlertsEnabled)
+    val latestVibrationAlertsEnabled by rememberUpdatedState(vibrationAlertsEnabled)
+    val latestPerspective3D by rememberUpdatedState(perspective3D)
+
+    DisposableEffect(mapLibreMap, styleReady, hasLocationPermission, gpsMode, searchRequestId, manualSwitchRequestId, searchActive) {
         val map = mapLibreMap
         if (map == null || !styleReady || !hasLocationPermission || gpsMode == GpsMode.STOPPED) {
             onDispose { }
@@ -593,11 +753,21 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             var discoveryJob: Job? = null
             var routeJob: Job? = null
             var markerAnimationJob: Job? = null
+            var positionAnimationJob: Job? = null
+            var pulseAnimationJob: Job? = null
+            var displayedMarkerLocation: LatLng? = null
+            var displayedArrowBearing = 0f
             val restaurantMarkers = linkedMapOf<String, Marker>()
             val pharmacyMarkers = linkedMapOf<String, Marker>()
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     val point = LatLng(location.latitude, location.longitude)
+                    latestUserLocation = Location(location)
+                    // A manual pan pauses follow only temporarily; resume it automatically on movement.
+                    val distanceSinceCameraFix = lastCameraLocation?.distanceTo(location) ?: 0f
+                    if (location.speed >= 1.2f || distanceSinceCameraFix >= 4f) {
+                        followUserCamera = true
+                    }
                     val clusterAtLocation = currentCluster
                     if (searchActive && clusterAtLocation != null && !autoSwitchTriggered) {
                         val clusterDistance = FloatArray(1)
@@ -613,34 +783,84 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 clusterEnteredAt = now
                                 onClusterEntered(clusterStableId(clusterAtLocation))
                             }
-                            val enteredAt = clusterEnteredAt
-                            if (enteredAt != null && now - enteredAt >= 5 * 60 * 1000L) {
-                                autoSwitchTriggered = true
-                                onAutoExclude(clusterStableId(clusterAtLocation), ClusterPolicy.automaticTimeout(clusterStableId(clusterAtLocation), now).untilEpochMillis)
-                            }
+                            // Expiry is driven by a dedicated timer, not the next GPS callback.
                         }
                     }
                     if (location.hasBearing() && location.speed >= 1.2f) currentBearing = location.bearing
-                    // The driver symbol is rendered as a single centered overlay (car in tracking,
-                    // direction arrow in navigation), so the map never shows a pin and arrow together.
-                    userMarker?.let { map.removeMarker(it); userMarker = null }
+                    // Marker rotation is relative to the map camera, so the arrow points
+                    // toward the top of the screen when the camera follows the driver's heading.
+                    val hasReliableBearing = location.hasBearing() && location.speed >= 1.2f
+                    val targetArrowBearing = if (hasReliableBearing) {
+                        ((location.bearing - map.cameraPosition.bearing.toFloat()) % 360f + 360f) % 360f
+                    } else displayedArrowBearing
+                    if (userMarker == null) {
+                        displayedMarkerLocation = point
+                        displayedArrowBearing = targetArrowBearing
+                        lastArrowBearing = targetArrowBearing
+                        userMarker = map.addMarker(
+                            MarkerOptions().position(point)
+                                .icon(createLocationArrowIcon(context, targetArrowBearing))
+                                .title("موقعك الحالي")
+                        )
+                    } else {
+                        val from = displayedMarkerLocation ?: userMarker!!.position
+                        val fromBearing = displayedArrowBearing
+                        var bearingDelta = ((targetArrowBearing - fromBearing + 540f) % 360f) - 180f
+                        positionAnimationJob?.cancel()
+                        positionAnimationJob = scope.launch {
+                            val started = SystemClock.elapsedRealtime()
+                            val duration = 650L
+                            var lastIconUpdate = 0L
+                            while (isActive) {
+                                val elapsed = (SystemClock.elapsedRealtime() - started).coerceAtMost(duration)
+                                val linear = elapsed.toFloat() / duration.toFloat()
+                                val eased = linear * linear * (3f - 2f * linear)
+                                val lat = from.latitude + (point.latitude - from.latitude) * eased
+                                val lon = from.longitude + (point.longitude - from.longitude) * eased
+                                userMarker?.position = LatLng(lat, lon)
+                                displayedMarkerLocation = LatLng(lat, lon)
+                                val smoothBearing = (fromBearing + bearingDelta * eased + 360f) % 360f
+                                displayedArrowBearing = smoothBearing
+                                if (elapsed - lastIconUpdate >= 55L || elapsed >= duration) {
+                                    userMarker?.icon = createLocationArrowIcon(context, smoothBearing)
+                                    lastIconUpdate = elapsed
+                                }
+                                if (elapsed >= duration) break
+                                delay(16L)
+                            }
+                            displayedMarkerLocation = point
+                            displayedArrowBearing = targetArrowBearing
+                            lastArrowBearing = targetArrowBearing
+                        }
+                    }
+                    lastArrowBearing = targetArrowBearing
+                    if (pulseAnimationJob == null) {
+                        pulseAnimationJob = scope.launch {
+                            while (isActive) {
+                                if (positionAnimationJob?.isActive != true && userMarker != null) {
+                                    val pulse = ((kotlin.math.sin(SystemClock.elapsedRealtime() / 650.0).toFloat() + 1f) / 2f)
+                                    userMarker?.icon = createLocationArrowIcon(context, displayedArrowBearing, pulse)
+                                }
+                                delay(120L)
+                            }
+                        }
+                    }
                     val previousCameraLocation = lastCameraLocation
-                    val navigating = navigationActive && activeDestination != null
-                    val shouldFollow = firstFix || ((trackingActive || navigating) && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 4f))
+                    val shouldFollow = followUserCamera && (firstFix || (latestTrackingActive && (previousCameraLocation == null || previousCameraLocation.distanceTo(location) >= 1.5f)))
                     if (shouldFollow) {
                         firstFix = false
                         val bearing = if (location.hasBearing() && location.speed >= 1.2f) location.bearing.toDouble() else map.cameraPosition.bearing
                         map.animateCamera(
                             CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().target(if (navigating) navigationLookAhead(location.latitude, location.longitude, bearing, 115.0) else point)
-                                    .zoom(if (navigating) 18.0 else 16.5)
-                                    .tilt(if (perspective3D || navigating) 58.0 else 0.0).bearing(bearing).build()
+                                CameraPosition.Builder().target(point)
+                                    .zoom(16.5)
+                                    .tilt(if (latestPerspective3D) 58.0 else 0.0).bearing(bearing).build()
                             ),
                             850
                         )
                         lastCameraLocation = Location(location)
                     }
-                    if (searchActive && searchRequestId > lastProcessedSearch) {
+                    if (searchActive && (searchRequestId > lastProcessedSearch || currentCluster == null)) {
                         lastProcessedSearch = searchRequestId
                         val requestId = searchRequestId
                         routeStatus = "جارٍ البحث المتوازي عن تجمعات المطاعم"
@@ -653,19 +873,21 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         pharmacyMarkers.clear()
                         routePoints = emptyList()
                         routeSteps = emptyList()
-                        currentStepIndex = 0
-                        nextTurnInstruction = ""
+                        spokenRouteStepIndex = 0
                         activeDestination = null
                         routeRequested = false
                         discoveryJob?.cancel()
                         discoveryJob = scope.launch {
                             var retry = 0
                             while (isActive && searchActive && requestId == searchRequestId) {
+                                var foundEligibleCluster = false
+                                // Re-read the newest fix on every retry; never keep querying from a stale cached coordinate.
+                                val searchLocation = latestUserLocation?.let { Location(it) } ?: Location(location)
                                 try {
                                     val clusters = RestaurantDiscoveryClient.findNearestClustersStreaming(
-                                        context, location.latitude, location.longitude
+                                        context, searchLocation.latitude, searchLocation.longitude
                                     ) { updatedClusters ->
-                                        if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming
+                                        if (!isActive || requestId != searchRequestId) return@findNearestClustersStreaming false
                                         updatedClusters.take(8).forEach { cluster ->
                                             val markerKey = "${(cluster.latitude * 100000).roundToInt()}:${(cluster.longitude * 100000).roundToInt()}"
                                             val markerPosition = LatLng(cluster.latitude, cluster.longitude)
@@ -680,21 +902,28 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             }
                                         }
                                         val now = System.currentTimeMillis()
-                                        val best = updatedClusters.firstOrNull { cluster ->
-                                            val id = clusterStableId(cluster)
-                                            val excludedUntil = excludedClusters[id]
-                                            val isExcluded = excludedUntil != null && excludedUntil > now
-                                            val lastVisit = visitedClusterIds.indexOfLast { it == id }
-                                            val otherVisits = if (lastVisit < 0) 4 else visitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
-                                            val repeatAllowed = lastVisit < 0 || otherVisits >= 4 || id in orderProducingClusterIds
-                                            !isExcluded && repeatAllowed
-                                        } ?: run {
-                                            routeStatus = "جميع التجمعات القريبة مستبعدة مؤقتاً أو لم يحن وقت تكرارها"
-                                            return@findNearestClustersStreaming
+                                        val availableClusters = updatedClusters.filter { cluster ->
+                                            val excludedUntil = latestExcludedClusters[clusterStableId(cluster)]
+                                            excludedUntil == null || excludedUntil <= now
                                         }
+                                        // Prefer a fresh/known productive cluster, but never stop discovery
+                                        // merely because the repeat-visit preference rejects every candidate.
+                                        val best = availableClusters.firstOrNull { cluster ->
+                                            val id = clusterStableId(cluster)
+                                            val lastVisit = latestVisitedClusterIds.indexOfLast { it == id }
+                                            val otherVisits = if (lastVisit < 0) 4 else latestVisitedClusterIds.drop(lastVisit + 1).distinct().count { it != id }
+                                            lastVisit < 0 || otherVisits >= 4 || id in latestOrderProducingClusterIds
+                                        } ?: run {
+                                            routeStatus = if (availableClusters.isEmpty())
+                                                "التجمعات القريبة مستبعدة مؤقتاً • يجري توسيع البحث"
+                                            else
+                                                "تمت زيارة التجمعات القريبة • يجري البحث عن تجمع جديد وفق قاعدة عدم التكرار"
+                                            return@findNearestClustersStreaming false
+                                        }
+                                        foundEligibleCluster = true
                                         if (currentCluster?.let { clusterStableId(it) } != clusterStableId(best)) {
                                             currentCluster = best
-                                            clusterEnteredAt = null
+                                            clusterEnteredAt = if (clusterStableId(best) == latestSelectedClusterId) latestClusterWaitStartedAt else null
                                             autoSwitchTriggered = false
                                         }
                                         onClusterSelected(best)
@@ -716,7 +945,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             routeJob = scope.launch {
                                                 val route = withContext(Dispatchers.IO) {
                                                     OsrmRouteClient.fetchRoute(
-                                                        location.latitude, location.longitude,
+                                                        searchLocation.latitude, searchLocation.longitude,
                                                         nextDestination.latitude, nextDestination.longitude
                                                     )
                                                 }
@@ -725,13 +954,11 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                 displayedRoutePolyline = null
                                                     displayedRoutePolyline = map.addPolyline(
                                                         PolylineOptions().addAll(route.points)
-                                                            .color(AndroidColor.rgb(94, 240, 194)).width(6f)
+                                                            .color(AndroidColor.rgb(13, 71, 161)).width(7f)
                                                     )
                                                     routePoints = route.points
                                                     routeSteps = route.steps
-                                                    currentStepIndex = 0
-                                                    nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                                    routeStatus = "تم رسم المسار • اضغط ابدأ الملاحة لبدء التوجيه"
+                                                    spokenRouteStepIndex = 0
                                                     routeStatus = "تم رسم المسار • ${(route.distanceMeters / 1000.0).toInt()} كم • ${(route.durationSeconds / 60.0).toInt()} د"
                                                 } else if (requestId == searchRequestId) {
                                                     routeRequested = false
@@ -741,10 +968,11 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                         } else {
                                             routeStatus = "تم تحديث نتائج مصادر المطاعم • أفضل تجمع: ${best.restaurantCount} مطعم"
                                         }
+                                        true
                                     }
                                     val nearbyPharmacies = withContext(Dispatchers.IO) {
                                         RiyadhPlacesDatabase.nearestPharmacies(
-                                            context, location.latitude, location.longitude, radiusMeters = 5000, limit = 30
+                                            context, searchLocation.latitude, searchLocation.longitude, radiusMeters = 5000, limit = 30
                                         )
                                     }
                                     nearbyPharmacies.forEach { pharmacy ->
@@ -760,77 +988,65 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                                             existingPharmacy.title = "صيدلية • ${pharmacy.name}"
                                         }
                                     }
-                                    if (clusters.isNotEmpty()) break
-                                    routeStatus = "لم تصل نتائج بعد • مستمر في البحث"
+                                    if (foundEligibleCluster) break
+                                    routeStatus = if (clusters.isNotEmpty())
+                                        "لم يتوفر تجمع صالح بعد • مستمر في البحث عن تجمع آخر"
+                                    else "لا توجد تجمعات قريبة في قاعدة الرياض حتى الآن • يجري توسيع نطاق البحث"
                                 } catch (error: Exception) {
-                                    routeStatus = "تعذر مصدر مؤقتاً • مستمر في إعادة المحاولة"
+                                    android.util.Log.e("HamedSmartDelivery", "Riyadh cluster discovery failed at ${searchLocation.latitude},${searchLocation.longitude}", error)
+                                    routeStatus = "تعذر قراءة قاعدة الرياض أو البحث: ${error.localizedMessage ?: error.javaClass.simpleName} • إعادة المحاولة"
                                 }
                                 retry += 1
                                 delay((2000L * (1L shl retry.coerceAtMost(4))).coerceAtMost(30000L))
                             }
                         }
                     }
-                    if (activeDestination != null && !routeRequested) {
+                    val pendingDestination = activeDestination
+                    if (pendingDestination != null && !routeRequested) {
                         routeRequested = true
                         routeStatus = "جارٍ حساب المسار"
-                        scope.launch {
+                        val routeRequestId = searchRequestId
+                        routeJob = scope.launch {
                             val route = withContext(Dispatchers.IO) {
-                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
+                                OsrmRouteClient.fetchRoute(
+                                    location.latitude, location.longitude,
+                                    pendingDestination.latitude, pendingDestination.longitude
+                                )
                             }
-                            if (route != null && route.points.size > 1) {
+                            if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination &&
+                                route != null && route.points.size > 1) {
                                 displayedRoutePolyline?.let { map.removePolyline(it) }
-                                displayedRoutePolyline = null
                                 displayedRoutePolyline = map.addPolyline(
                                     PolylineOptions().addAll(route.points)
-                                        .color(AndroidColor.rgb(94, 240, 194))
-                                        .width(6f)
+                                        .color(AndroidColor.rgb(13, 71, 161))
+                                        .width(7f)
                                 )
                                 routePoints = route.points
                                 routeSteps = route.steps
-                                currentStepIndex = 0
-                                nextTurnInstruction = route.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                routeStatus = "تم رسم المسار • اضغط ابدأ الملاحة لبدء التوجيه"
+                                spokenRouteStepIndex = 0
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
-                            } else {
+                            } else if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination) {
                                 routeRequested = false
                                 routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
                             }
                         }
                     }
-                    val currentStep = routeSteps.getOrNull(currentStepIndex)
-                    val maneuverPoint = currentStep?.location
-                    if (maneuverPoint != null) {
-                        val distanceToManeuver = FloatArray(1)
-                        Location.distanceBetween(location.latitude, location.longitude, maneuverPoint.latitude, maneuverPoint.longitude, distanceToManeuver)
-                        if (distanceToManeuver[0] <= 45f && currentStepIndex < routeSteps.lastIndex) {
-                            currentStepIndex += 1
-                            nextTurnInstruction = routeSteps.getOrNull(currentStepIndex)?.instruction ?: "وصلت إلى وجهتك"
-                            if (navigationActive && ttsReady) speech.speak(nextTurnInstruction, TextToSpeech.QUEUE_FLUSH, null, "hamed-turn-$currentStepIndex")
-                        }
-                    }
                     val currentRoute = routePoints
-                    if (navigationActive && currentRoute.size > 3) {
-                        var nearestIndex = 0
-                        var nearestOnRoute = Float.MAX_VALUE
-                        currentRoute.forEachIndexed { index, routePoint ->
-                            val result = FloatArray(1)
-                            Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
-                            if (result[0] < nearestOnRoute) {
-                                nearestOnRoute = result[0]
-                                nearestIndex = index
-                            }
-                        }
-                        if (nearestIndex >= 3 && nearestOnRoute <= 70f && currentRoute.size - nearestIndex >= 2) {
-                            val remaining = currentRoute.drop(nearestIndex)
-                            routePoints = remaining
-                            displayedRoutePolyline?.let { map.removePolyline(it) }
-                            displayedRoutePolyline = map.addPolyline(
-                                PolylineOptions().addAll(remaining)
-                                    .color(AndroidColor.rgb(94, 240, 194)).width(6f)
-                            )
+                    if (searchActive && spokenRouteStepIndex < routeSteps.size) {
+                        val nextStep = routeSteps[spokenRouteStepIndex]
+                        val maneuverPoint = nextStep.location
+                        val maneuverDistance = maneuverPoint?.let {
+                            val distance = FloatArray(1)
+                            Location.distanceBetween(location.latitude, location.longitude, it.latitude, it.longitude, distance)
+                            distance[0]
+                        } ?: 0f
+                        if (maneuverDistance <= 250f) {
+                            onVoiceInstruction(nextStep.instruction, nextStep.instructionEnglish)
+                            spokenRouteStepIndex += 1
                         }
                     }
-                    if (activeDestination != null && currentRoute.size > 1) {
+
+                    if (searchActive && activeDestination != null && currentRoute.size > 1) {
                         val nearestDistance = currentRoute.minOf { routePoint ->
                             val result = FloatArray(1)
                             Location.distanceBetween(location.latitude, location.longitude, routePoint.latitude, routePoint.longitude, result)
@@ -838,29 +1054,36 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                         val now = System.currentTimeMillis()
                         if (nearestDistance > 85f && now - lastRerouteAt > 20000L) {
-                            lastRerouteAt = now
-                            routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
-                            scope.launch {
-                                val updated = withContext(Dispatchers.IO) {
-                                    OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
-                                }
-                                if (updated != null && updated.points.size > 1) {
-                                    displayedRoutePolyline?.let { map.removePolyline(it) }
-                                displayedRoutePolyline = null
-                                    displayedRoutePolyline = map.addPolyline(
-                                        PolylineOptions().addAll(updated.points)
-                                            .color(AndroidColor.rgb(94, 240, 194))
-                                            .width(6f)
-                                    )
-                                    routePoints = updated.points
-                                    routeSteps = updated.steps
-                                    currentStepIndex = 0
-                                    nextTurnInstruction = updated.steps.firstOrNull()?.instruction ?: "واصل السير على المسار"
-                                    alertRouteChanged(context, soundAlertsEnabled, vibrationAlertsEnabled)
-                                    if (ttsReady && soundAlertsEnabled) speech.speak("تم تحديث المسار. $nextTurnInstruction", TextToSpeech.QUEUE_FLUSH, null, "hamed-reroute")
-                                    routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
-                                } else {
-                                    routeStatus = "تعذر تحديث المسار حالياً"
+                            val rerouteDestination = activeDestination
+                            if (rerouteDestination != null) {
+                                lastRerouteAt = now
+                                routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
+                                val rerouteRequestId = searchRequestId
+                                routeJob = scope.launch {
+                                    val updated = withContext(Dispatchers.IO) {
+                                        OsrmRouteClient.fetchRoute(
+                                            location.latitude, location.longitude,
+                                            rerouteDestination.latitude, rerouteDestination.longitude
+                                        )
+                                    }
+                                    if (isActive && rerouteRequestId == searchRequestId &&
+                                        activeDestination == rerouteDestination && updated != null && updated.points.size > 1) {
+                                        displayedRoutePolyline?.let { map.removePolyline(it) }
+                                        displayedRoutePolyline = map.addPolyline(
+                                            PolylineOptions().addAll(updated.points)
+                                                .color(AndroidColor.rgb(13, 71, 161))
+                                                .width(7f)
+                                        )
+                                        routePoints = updated.points
+                                        routeSteps = updated.steps
+                                        spokenRouteStepIndex = 0
+                                        alertRouteChanged(context, latestSoundAlertsEnabled, latestVibrationAlertsEnabled)
+                                        onRouteChanged()
+                                        routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
+                                    } else if (isActive && rerouteRequestId == searchRequestId &&
+                                        activeDestination == rerouteDestination) {
+                                        routeStatus = "تعذر تحديث المسار حالياً"
+                                    }
                                 }
                             }
                         }
@@ -868,25 +1091,44 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 }
             }
             try {
-                val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
-                locationManager.requestLocationUpdates(provider, 3000L, 5f, listener, Looper.getMainLooper())
-                // Use a cached fix immediately: discovery and route calculation must work while the driver is stationary.
-                (locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER))?.let { listener.onLocationChanged(it) }
+                var requestedProvider = false
+                for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
+                    if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
+                        try {
+                            locationManager.requestLocationUpdates(provider, 1000L, 1f, listener, Looper.getMainLooper())
+                            requestedProvider = true
+                        } catch (_: SecurityException) {
+                            // Continue to NETWORK_PROVIDER if GPS_PROVIDER is not permitted.
+                        }
+                    }
+                }
+                // Use the newest cached fix immediately, then keep receiving live GPS/network fixes.
+                val cachedFix = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                    .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
+                    .maxByOrNull { it.time }
+                cachedFix?.takeIf {
+                    it.time > 0L && System.currentTimeMillis() >= it.time &&
+                        System.currentTimeMillis() - it.time <= 120_000L
+                }?.let { listener.onLocationChanged(it) }
+                if (!requestedProvider) routeStatus = "يرجى تفعيل خدمة الموقع GPS من إعدادات الهاتف"
             } catch (_: SecurityException) {
                 // Permission may be revoked while the map is open.
             } catch (_: IllegalArgumentException) {
                 // No location provider is available on this device.
             }
             onDispose {
+                if (routeJob?.isActive == true) routeRequested = false
                 discoveryJob?.cancel()
                 routeJob?.cancel()
                 markerAnimationJob?.cancel()
+                positionAnimationJob?.cancel()
+                pulseAnimationJob?.cancel()
                 restaurantMarkers.values.forEach { map.removeMarker(it) }
                 restaurantMarkers.clear()
                 pharmacyMarkers.values.forEach { map.removeMarker(it) }
                 pharmacyMarkers.clear()
                 try { locationManager.removeUpdates(listener) } catch (_: Exception) { }
+                userMarker?.let { map.removeMarker(it); userMarker = null }
             }
         }
     }
@@ -897,72 +1139,11 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             factory = { mapView },
             update = { }
         )
-        if (gpsMode == GpsMode.TRACKING) {
-            Surface(
-                modifier = Modifier.align(Alignment.Center).size(42.dp),
-                color = Panel.copy(alpha = .96f),
-                shape = CircleShape
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Navigation,
-                        null,
-                        tint = Mint,
-                        modifier = Modifier.size(26.dp).rotate(currentBearing)
-                    )
-                }
-            }
-        }
-        if (nextTurnInstruction.isNotBlank()) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 70.dp, vertical = 12.dp),
-                color = Panel.copy(alpha = .96f),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Navigation, null, tint = Mint, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(nextTurnInstruction, color = Color.White, fontSize = 12.sp, maxLines = 2)
-                }
-            }
-        }
-        if (activeDestination != null && routePoints.size > 1) {
-            OutlinedButton(
-                onClick = { showMapProviderDialog = true },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 54.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-            ) {
-                Icon(Icons.Rounded.Map, null)
-                Spacer(Modifier.width(5.dp))
-                Text("تبديل تطبيق الخريطة")
-            }
-        }
-        if (showMapProviderDialog && activeDestination != null) {
-            AlertDialog(
-                onDismissRequest = { showMapProviderDialog = false },
-                title = { Text("اختيار تطبيق الخريطة", color = Color.White) },
-                text = { Text("اختر طريقة عرض هذا المسار. يمكنك إبقاء الخريطة المحلية أو فتح الوجهة في Google Maps.", color = Muted) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showMapProviderDialog = false
-                        openGoogleMaps(context, activeDestination!!)
-                    }) { Text("فتح Google Maps", color = Mint) }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showMapProviderDialog = false
-                        mapProviderNotice = "الخريطة المحلية هي المحددة"
-                    }) { Text("الخريطة المحلية", color = Color.White) }
-                },
-                containerColor = Panel,
-                titleContentColor = Color.White
-            )
-        }
-        if (mapProviderNotice.isNotBlank()) {
-            Surface(modifier = Modifier.align(Alignment.BottomStart).padding(12.dp), color = Panel.copy(alpha = .96f), shape = RoundedCornerShape(12.dp)) {
-                Text(mapProviderNotice, color = Mint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-            }
-        }
+
+
+
+
+
         if (routeStatus.isNotBlank()) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
@@ -973,6 +1154,25 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             }
         }
     }
+}
+
+private fun createLocationArrowIcon(context: Context, bearing: Float, pulse: Float = 0f): org.maplibre.android.annotations.Icon {
+    val drawable = ContextCompat.getDrawable(context, R.drawable.ic_location_arrow)
+        ?: error("Location arrow drawable is missing")
+    val bitmap = Bitmap.createBitmap(72, 72, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, 72, 72)
+    val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.argb((110 * (1f - pulse)).toInt().coerceIn(0, 110), 94, 240, 194)
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+    }
+    canvas.drawCircle(36f, 36f, 20f + pulse * 8f, glowPaint)
+    canvas.save()
+    canvas.rotate(bearing, 36f, 36f)
+    drawable.draw(canvas)
+    canvas.restore()
+    return IconFactory.getInstance(context).fromBitmap(bitmap)
 }
 
 @Composable
@@ -997,7 +1197,7 @@ private fun MapAction(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 }
 
 @Composable
-private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingSeconds: Int, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
+private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingSeconds: Int, onEndWork: () -> Unit, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
     val mode = snapshot.mode
     val title = when (mode) {
         DriverMode.IDLE -> if (english) "Ready" else "جاهز للبحث"
@@ -1061,6 +1261,16 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingS
             Spacer(Modifier.height(5.dp))
             Text(if (english) "The app keeps searching between suitable clusters automatically." else "يستمر التطبيق في البحث والتنقل بين التجمعات تلقائياً.", color = Muted, fontSize = 10.sp)
         }
+        if (mode == DriverMode.SEARCHING || mode == DriverMode.ORDER_RECEIVED) {
+            OutlinedButton(
+                onClick = onEndWork,
+                modifier = Modifier.fillMaxWidth().height(37.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF8A80))
+            ) {
+                Text(if (english) "END WORK" else "انتهاء العمل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
@@ -1090,10 +1300,10 @@ private fun PlacesScreen(english: Boolean) {
         Surface(color = Panel, shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Icon(Icons.Rounded.Restaurant, null, tint = Mint, modifier = Modifier.size(28.dp))
-                Text(if (english) "Restaurant discovery is being connected" else "يجري تجهيز اكتشاف المطاعم", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(if (english) "Riyadh restaurant clusters are available" else "اكتشاف تجمعات المطاعم من قاعدة الرياض", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(
-                    if (english) "The ranking model separates public map signals from your observed order history. No live demand is fabricated. Nearby restaurant feeds and saved observations are not active yet."
-                    else "نموذج الترتيب يفرّق بين إشارات الخرائط العامة وسجل الطلبات الذي ترصده بنفسك. لن نخترع طلباً أو ازدحاماً غير حقيقي. مصادر المطاعم القريبة وحفظ الملاحظات لم تُفعّل بعد.",
+                    if (english) "Restaurant and cafe clusters are read from the bundled Riyadh database and ranked by distance, density and manually confirmed order history. No live HungerStation order feed is connected, and no demand is fabricated."
+                    else "يتم جلب تجمعات المطاعم والمقاهي من قاعدة الرياض المحلية وترتيبها حسب المسافة والكثافة وسجل الطلبات الذي تؤكده يدوياً. لا توجد تغذية طلبات مباشرة من هنقرستيشن حالياً، ولا يتم اختراع طلب أو ازدحام.",
                     color = Muted, fontSize = 12.sp
                 )
             }
@@ -1102,7 +1312,7 @@ private fun PlacesScreen(english: Boolean) {
 }
 
 @Composable
-private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, trackingActive: Boolean, onToggleTracking: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit, announcementsEnabled: Boolean, onAnnouncementsChange: (Boolean) -> Unit, announcementVolume: Float, onAnnouncementVolumeChange: (Float) -> Unit, onTestAnnouncement: () -> Unit) {
+private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, soundAlertsEnabled: Boolean, vibrationAlertsEnabled: Boolean, onSoundChange: (Boolean) -> Unit, onVibrationChange: (Boolean) -> Unit, announcementsEnabled: Boolean, onAnnouncementsChange: (Boolean) -> Unit, announcementVolume: Float, onAnnouncementVolumeChange: (Float) -> Unit, taskReminderIntervalMinutes: Int, onTaskReminderIntervalChange: (Int) -> Unit, onTestAnnouncement: () -> Unit) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(if (english) "PROFILE & SETTINGS" else "حسابي والإعدادات", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleLanguage() }) {
@@ -1111,17 +1321,6 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 Spacer(Modifier.width(12.dp))
                 Text(if (english) "Switch to Arabic" else "تغيير اللغة إلى الإنجليزية", color = Color.White, modifier = Modifier.weight(1f))
                 Icon(Icons.Rounded.ChevronRight, null, tint = Muted)
-            }
-        }
-        Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().clickable { onToggleTracking() }) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.GpsFixed, null, tint = Mint)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(if (english) "Background GPS session" else "جلسة تتبع GPS", color = Color.White)
-                    Text(if (trackingActive) if (english) "Active" else "نشطة" else if (english) "Stopped" else "متوقفة", color = Muted, fontSize = 11.sp)
-                }
-                Icon(if (trackingActive) Icons.Rounded.ToggleOn else Icons.Rounded.ToggleOff, null, tint = if (trackingActive) Mint else Muted)
             }
         }
         Surface(color = Panel, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
@@ -1153,6 +1352,8 @@ private fun ProfileScreen(english: Boolean, onToggleLanguage: () -> Unit, tracki
                 }
                 Text(if (english) "Announcement volume" else "مستوى صوت التعليمات", color = Color.White, fontSize = 12.sp)
                 Slider(value = announcementVolume, onValueChange = onAnnouncementVolumeChange, enabled = announcementsEnabled)
+                Text(if (english) "Task reminder interval: $taskReminderIntervalMinutes min" else "تذكير إكمال المهمة كل $taskReminderIntervalMinutes دقائق", color = Color.White, fontSize = 12.sp)
+                Slider(value = taskReminderIntervalMinutes.toFloat(), onValueChange = { onTaskReminderIntervalChange(it.roundToInt()) }, valueRange = 1f..10f, steps = 8, enabled = announcementsEnabled)
                 OutlinedButton(onClick = onTestAnnouncement, enabled = announcementsEnabled, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.VolumeUp, null)
                     Spacer(Modifier.width(7.dp))

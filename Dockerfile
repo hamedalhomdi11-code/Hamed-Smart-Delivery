@@ -1,4 +1,4 @@
-FROM ghcr.io/cirruslabs/android-sdk:35
+FROM ghcr.io/cirruslabs/android-sdk:35 AS builder
 ENV DEBIAN_FRONTEND=noninteractive ANDROID_HOME=/opt/android-sdk-linux ANDROID_SDK_ROOT=/opt/android-sdk-linux
 WORKDIR /workspace
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip curl unzip osmium-tool && rm -rf /var/lib/apt/lists/*
@@ -13,6 +13,27 @@ RUN test -d "$ANDROID_HOME/platforms/android-35" && printf 'sdk.dir=%s\n' "$ANDR
 RUN bash scripts/build_riyadh_database.sh
 # Limit concurrent dependency requests to reduce pressure on public artifact repositories.
 RUN gradle --no-daemon --max-workers=2 --build-cache :app:testDebugUnitTest :app:assembleDebug
-RUN mkdir -p /srv && cp app/build/outputs/apk/debug/app-debug.apk /srv/hamed-smart-delivery-0.4.3-debug.apk && cp data/output/riyadh-build-report.json /srv/riyadh-build-report.json
+RUN set -e; \
+    mkdir -p /srv; \
+    APK=app/build/outputs/apk/debug/app-debug.apk; \
+    test -s "$APK"; \
+    unzip -l "$APK" | grep -q 'assets/hamed_smart_delivery_riyadh.sqlite'; \
+    "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "package: name='com.hamed.smartdelivery'"; \
+    "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "versionName='0.4.3'"; \
+    "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -q "versionCode='8'"; \
+    "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > /srv/apk-signature.txt 2>&1; \
+    cp "$APK" /srv/hamed-smart-delivery-0.4.3-debug.apk; \
+    cp data/output/riyadh-build-report.json /srv/riyadh-build-report.json; \
+    APK_SIZE=$(stat -c '%s' "$APK"); \
+    APK_SHA256=$(sha256sum "$APK" | cut -d' ' -f1); \
+    printf '{"versionName":"0.4.3","versionCode":8,"variant":"debug","apkSizeBytes":%s,"apkSha256":"%s","riyadhDatabaseAsset":"verified","signature":"verified"}\n' "$APK_SIZE" "$APK_SHA256" > /srv/apk-build-report.json; \
+    cat /srv/apk-build-report.json
+# Keep the Android SDK, Gradle, Overture tooling and build datasets out of the runtime image.
+# The free Render web service only needs the APK and the tiny standard-library download server.
+FROM python:3.12-slim AS runtime
+WORKDIR /workspace
+COPY --from=builder /srv /srv
+COPY scripts/serve_apk.py /workspace/scripts/serve_apk.py
+ENV PORT=10000
 EXPOSE 10000
 CMD ["python3", "/workspace/scripts/serve_apk.py"]

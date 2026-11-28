@@ -14,6 +14,18 @@ class DriverStateTest {
         assertEquals(DriverMode.SEARCHING, state.mode)
     }
 
+    @Test fun endWorkReturnsSearchingOrDeliveryToIdle() {
+        val searching = DriverReducer.reduce(DriverSnapshot(), DriverCommand.StartSearch).snapshot
+        val endedSearch = DriverReducer.reduce(searching, DriverCommand.EndWork)
+        assertTrue(endedSearch.accepted)
+        assertEquals(DriverMode.IDLE, endedSearch.snapshot.mode)
+
+        val delivering = DriverReducer.reduce(searching, DriverCommand.OrderReceived).snapshot
+        val endedDelivery = DriverReducer.reduce(delivering, DriverCommand.EndWork)
+        assertTrue(endedDelivery.accepted)
+        assertEquals(DriverMode.IDLE, endedDelivery.snapshot.mode)
+    }
+
     @Test fun invalidCommandDoesNotMutateState() {
         val state = DriverSnapshot(DriverMode.IDLE)
         val result = DriverReducer.reduce(state, DriverCommand.OrderReceived)

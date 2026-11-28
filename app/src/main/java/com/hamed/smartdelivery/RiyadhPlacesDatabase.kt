@@ -25,7 +25,7 @@ data class NearbyPlace(
 object RiyadhPlacesDatabase {
     private const val ASSET_NAME = "hamed_smart_delivery_riyadh.sqlite"
     private const val DATABASE_NAME = "hamed_smart_delivery_riyadh.sqlite"
-    private const val ASSET_VERSION = "riyadh-food-hotspots-v3-20261126"
+    private const val ASSET_VERSION = "riyadh-food-hotspots-v3-20261128-r2"
 
     @Volatile private var cachedDatabase: SQLiteDatabase? = null
     @Volatile private var cachedPath: String? = null
@@ -50,8 +50,13 @@ object RiyadhPlacesDatabase {
                 }
                 check(integrity == "ok") { "قاعدة بيانات الرياض غير سليمة: $integrity" }
                 validation.rawQuery(
-                    "SELECT 1 FROM food_density_clusters_v3 LIMIT 1", null
-                ).use { cursor -> check(cursor.moveToFirst()) { "جدول تجمعات v3 فارغ أو غير موجود" } }
+                    "SELECT COUNT(*) FROM food_density_clusters_v3 WHERE category IN ('restaurant', 'cafe')",
+                    null
+                ).use { cursor ->
+                    check(cursor.moveToFirst() && cursor.getInt(0) > 0) {
+                        "قاعدة الرياض لا تحتوي تجمعات مطاعم/مقاهي صالحة"
+                    }
+                }
             } finally {
                 validation.close()
             }
