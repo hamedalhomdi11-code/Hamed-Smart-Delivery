@@ -56,7 +56,7 @@ class GpsMotionFilter {
             }
             val delta = ((targetBearing - priorBearing + 540.0) % 360.0) - 180.0
             bearing = ((priorBearing + delta * alpha + 360.0) % 360.0).toFloat()
-            accuracy = accuracy
+            this.accuracy = accuracy
         }
         previous = filtered
         return Location(filtered)
