@@ -89,3 +89,4 @@ Verification:
 - A fresh Render build against the latest branch head is required; the earlier in-progress deploy used an older commit and does not include these changes.
 - Physical-device start/stop, GPS fix, database import and road-route rendering still require confirmation on the user's phone.
 - Follow-up hardening: the map itself now exposes the GPS toggle; the toggle reads persisted service state and displays exceptions; GPS service start/stop and provider failures are logged; the no-provider path no longer recreates an orphaned ongoing notification after stopping.
+- The duplicate Profile GPS control was removed so the app has one clear start/stop GPS toggle on the map, matching the accepted single-control design; Profile remains for preferences and language.
