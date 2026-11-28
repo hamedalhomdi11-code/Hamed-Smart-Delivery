@@ -2,6 +2,9 @@ name: Android CI
 permissions:
   actions: read
   contents: read
+concurrency:
+  group: hamed-smart-delivery-android-ci-${{ github.ref }}
+  cancel-in-progress: true
 on:
   push:
     branches: [ main, develop, "release/**", "feature/**" ]
