@@ -242,6 +242,8 @@ async function getManagementToken(env: Env): Promise<string> {
     body: JSON.stringify({
       grant_type: "client_credentials", client_id: env.AUTH0_MGMT_CLIENT_ID,
       client_secret: env.AUTH0_MGMT_CLIENT_SECRET, audience: `https://${domain}/api/v2/`,
+      // Explicitly request the Management API scopes granted to this M2M application.
+      scope: env.AUTH0_MGMT_SCOPE?.trim() || "create:users read:users update:users delete:users",
     }),
   });
   if (!response.ok) throw new Error("auth0_management_token_failed");
