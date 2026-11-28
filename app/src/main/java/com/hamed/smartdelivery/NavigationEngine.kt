@@ -79,7 +79,9 @@ object RouteGeometryMatcher {
     fun match(
         location: LatLng,
         route: List<LatLng>,
-        previousProgressMeters: Double = 0.0
+        previousProgressMeters: Double = 0.0,
+        headingDegrees: Double? = null,
+        speedMetersPerSecond: Double = 0.0
     ): RouteMatch? {
         if (route.size < 2) return null
         var cumulative = 0.0
@@ -109,7 +111,11 @@ object RouteGeometryMatcher {
             val crossTrack = hypot(px, py)
             val progress = cumulative + segmentLength * fraction
             val backwardPenalty = max(0.0, previousProgressMeters - progress - 12.0) * 1.8
-            val score = crossTrack + backwardPenalty
+            val segmentHeading = bearingDegrees(a.latitude, a.longitude, b.latitude, b.longitude)
+            val headingPenalty = if (headingDegrees != null && speedMetersPerSecond >= 1.5) {
+                angularDifference(segmentHeading, headingDegrees) * 0.30
+            } else 0.0
+            val score = crossTrack + backwardPenalty + headingPenalty
             if (score < bestScore) {
                 val snappedLat = location.latitude + Math.toDegrees(py / EARTH_RADIUS_METERS)
                 val snappedLon = location.longitude + Math.toDegrees(px / (EARTH_RADIUS_METERS * cosLat))
@@ -141,7 +147,7 @@ object RouteGeometryMatcher {
                 )
                 if (completed.lastOrNull() != split) completed += split
                 remaining += split
-                remaining += route.drop(index + 1)
+                remaining += if (fraction >= 0.999999) route.drop(index + 2) else route.drop(index + 1)
                 break
             }
             cumulative += segmentLength
@@ -152,6 +158,9 @@ object RouteGeometryMatcher {
 
     fun routeLengthMeters(route: List<LatLng>): Double =
         route.zipWithNext().sumOf { (a, b) -> haversine(a.latitude, a.longitude, b.latitude, b.longitude) }
+
+    private fun angularDifference(first: Double, second: Double): Double =
+        abs(((first - second + 540.0) % 360.0) - 180.0)
 
     private fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)
