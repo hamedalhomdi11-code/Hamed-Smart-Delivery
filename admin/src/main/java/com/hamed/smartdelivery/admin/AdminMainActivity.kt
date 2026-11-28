@@ -256,7 +256,7 @@ private fun AdminDashboard() {
                 title = { Text("إنشاء حساب سائق", color = Color.White) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        OutlinedTextField(value = newUsername, onValueChange = { newUsername = it }, label = { Text("اسم المستخدم") }, singleLine = true)
+                        OutlinedTextField(value = newUsername, onValueChange = { newUsername = it }, label = { Text("اسم المستخدم (1–15 حرفاً)") }, singleLine = true, supportingText = { Text("أحرف إنجليزية صغيرة وأرقام و . _ -") })
                         OutlinedTextField(value = newPassword, onValueChange = { newPassword = it }, label = { Text("كلمة مرور السائق") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                         OutlinedTextField(value = duration, onValueChange = { duration = it.filter(Char::isDigit) }, label = { Text("مدة الصلاحية") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                         Box {
@@ -271,7 +271,7 @@ private fun AdminDashboard() {
                     }
                 },
                 confirmButton = {
-                    Button(enabled = !loading && newUsername.isNotBlank() && newPassword.length >= 10 && (duration.toIntOrNull() ?: 0) > 0, onClick = {
+                    Button(enabled = !loading && newUsername.matches(Regex("^[a-z0-9_.-]{1,15}$")) && newPassword.length >= 10 && (duration.toIntOrNull() ?: 0) > 0, onClick = {
                         scope.launch {
                             loading = true
                             runCatching { api.createDriver(newUsername.trim(), newPassword, duration.toInt(), durationUnit); api.drivers() }
