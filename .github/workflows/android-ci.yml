@@ -50,10 +50,10 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - name: Build and test debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: gradle --no-daemon :app:testAuthenticatedDebugUnitTest :app:testGuestDebugUnitTest :app:assembleAuthenticatedDebug :app:assembleGuestDebug
       - name: Verify debug APK
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="app/build/outputs/apk/authenticated/debug/app-authenticated-debug.apk"
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-debug-signature.txt
       - name: Configure permanent 0.4.3 release signing key
@@ -80,8 +80,8 @@ jobs:
           HAMED_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           HAMED_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          gradle --no-daemon :app:assembleRelease
-          APK="app/build/outputs/apk/release/app-release.apk"
+          gradle --no-daemon :app:assembleAuthenticatedRelease
+          APK="app/build/outputs/apk/authenticated/release/app-authenticated-release.apk"
           test -s "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee apk-release-signature.txt
       - name: Upload APKs and signature reports
@@ -89,8 +89,8 @@ jobs:
         with:
           name: hamed-smart-delivery-0.4.3-build
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/authenticated/debug/app-authenticated-debug.apk
+            app/build/outputs/apk/authenticated/release/app-authenticated-release.apk
             apk-debug-signature.txt
             apk-release-signature.txt
           if-no-files-found: warn
@@ -106,4 +106,4 @@ jobs:
           emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: gradle --no-daemon :app:connectedDebugAndroidTest
+          script: gradle --no-daemon :app:connectedAuthenticatedDebugAndroidTest
