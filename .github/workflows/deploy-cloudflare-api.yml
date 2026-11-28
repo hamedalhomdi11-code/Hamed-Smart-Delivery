@@ -75,3 +75,18 @@ jobs:
 
       - name: Deploy Worker
         run: npx wrangler deploy --config wrangler.toml
+
+      - name: Verify deployed Worker and remote D1 health
+        shell: bash
+        run: |
+          set -euo pipefail
+          HEALTH_URL="https://hamed-smart-delivery-api.hamedalhomdi11.workers.dev/health"
+          for attempt in $(seq 1 10); do
+            if curl -fsS "$HEALTH_URL" -o /tmp/hamed-worker-health.json; then
+              node -e 'const x=JSON.parse(require("fs").readFileSync("/tmp/hamed-worker-health.json","utf8"));if(x.ok!==true||x.database!=="connected")throw new Error("Worker or D1 health check did not pass");console.log("Worker health and D1 connectivity verified.");'
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::Worker health endpoint did not become ready or D1 is unavailable."
+          exit 1
