@@ -8,7 +8,7 @@ val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "").trim().trimEnd
 
 android {
     namespace = "com.hamed.smartdelivery.admin"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.hamed.smartdelivery.admin"
         minSdk = 26
