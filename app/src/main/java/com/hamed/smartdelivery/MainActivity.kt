@@ -235,6 +235,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             "انتهت خمس دقائق ولم يصل طلب من هذا التجمع. تم استبعاده لمدة خمس عشرة دقيقة ويجري البحث عن تجمع آخر" -> "Five minutes passed without an order. This cluster is excluded for fifteen minutes while another is selected."
             "تم استبعاد التجمع السابق لمدة عشر دقائق. يجري البحث عن التجمع التالي" -> "The previous cluster is excluded for ten minutes. Searching for the next cluster."
             "هذا اختبار للتعليمات الصوتية في حامد سمارت دليفري" -> "This is a test of Hamed Smart Delivery voice guidance."
+            "انتهى وقت العمل. يمكنك بدء البحث عن الطلبات من جديد." -> "The work session has ended. You can start searching for orders again."
             else -> message
         }
         if (announcementsEnabled && speechReady && spoken.isNotBlank()) {
@@ -1064,7 +1065,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                 for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                     if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
                         try {
-                            locationManager.requestLocationUpdates(provider, 2500L, 3f, listener, Looper.getMainLooper())
+                            locationManager.requestLocationUpdates(provider, 1000L, 1f, listener, Looper.getMainLooper())
                             requestedProvider = true
                         } catch (_: SecurityException) {
                             // Continue to NETWORK_PROVIDER if GPS_PROVIDER is not permitted.
