@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p data/source data/output app/src/main/assets
-curl -L --fail --retry 5 --retry-all-errors "https://huggingface.co/datasets/Bayanat-Labs/arab-world-places-atlas/resolve/main/data/places/places-SA.parquet?download=true" -o data/source/places-SA.parquet
+curl -L --fail --connect-timeout 20 --max-time 300 --retry 2 --retry-all-errors "https://huggingface.co/datasets/Bayanat-Labs/arab-world-places-atlas/resolve/main/data/places/places-SA.parquet?download=true" -o data/source/places-SA.parquet
 test -s data/source/places-SA.parquet
 python3 database/build_riyadh_atlas.py data/source/places-SA.parquet data/output/hamed_smart_delivery_riyadh.sqlite
 
@@ -16,7 +16,7 @@ if python3 database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riy
 else
   echo '{"status":"unavailable","source":"Wikidata Query Service"}' > data/output/wikidata_sync.report.json
 fi
-if curl -L --fail --retry 3 --retry-all-errors "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf" -o data/source/gcc-states-latest.osm.pbf && test -s data/source/gcc-states-latest.osm.pbf; then
+if curl -L --fail --connect-timeout 20 --max-time 240 --retry 1 --retry-all-errors "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf" -o data/source/gcc-states-latest.osm.pbf && test -s data/source/gcc-states-latest.osm.pbf; then
   osmium extract -b 46.20,24.05,47.35,25.15 data/source/gcc-states-latest.osm.pbf -o data/source/riyadh.osm.pbf --overwrite
   osmium tags-filter data/source/riyadh.osm.pbf nwr/shop nwr/amenity nwr/healthcare nwr/education nwr/tourism nwr/leisure nwr/sport nwr/craft nwr/office nwr/public_transport nwr/highway=bus_stop,services nwr/railway nwr/emergency nwr/aeroway nwr/club -o data/source/riyadh-pois.osm.pbf --overwrite
   osmium export data/source/riyadh-pois.osm.pbf --add-unique-id=type_id -o data/source/riyadh-pois.geojson --overwrite
