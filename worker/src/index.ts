@@ -126,7 +126,7 @@ async function bootstrapAdmin(env: Env, username: string, password: string): Pro
 async function adminLogin(request: Request, env: Env): Promise<Response> {
   if (!env.ADMIN_USERNAME) return json({ error: "admin_username_not_configured" }, 503);
   const body = await readJson(request);
-  const username = typeof body?.username === "string" ? body.username.trim() : "";
+  const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   if (!username || !password || username.length > 80 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
   const bootstrapRow = await env.DB.prepare("SELECT id FROM admin_credentials WHERE id = 1").first<{ id: number }>();
@@ -253,7 +253,7 @@ async function createDriver(request: Request, env: Env): Promise<Response> {
   const password = typeof body?.password === "string" ? body.password : "";
   const durationValue = Number(body?.durationValue);
   const durationUnit = typeof body?.durationUnit === "string" ? body.durationUnit : "";
-  if (!/^[A-Za-z0-9_.-]{3,40}$/.test(username)) return json({ error: "username_format_invalid" }, 400);
+  if (!/^[a-z0-9_.-]{1,15}$/.test(username)) return json({ error: "username_format_invalid" }, 400);
   if (password.length < 10 || password.length > 128) return json({ error: "driver_password_must_be_at_least_10_characters" }, 400);
   if (!Number.isInteger(durationValue) || durationValue < 1 || durationValue > 3650 || !["days", "weeks", "months"].includes(durationUnit)) {
     return json({ error: "duration_invalid" }, 400);
@@ -262,8 +262,13 @@ async function createDriver(request: Request, env: Env): Promise<Response> {
   const validUntil = addDuration(now, durationValue, durationUnit);
   let auth0UserId: string | null = null;
   try {
+    // Auth0 database connections configured for username sign-in require both
+    // username and email. Use a reserved .invalid address: it is unique per
+    // driver, cannot receive mail, and password resets remain administrator-led.
+    const internalEmail = `${username}@drivers.hamed-smart-delivery.invalid`;
     const user = await auth0Request(env, "users", "POST", {
-      connection: env.AUTH0_DB_CONNECTION, username, password,
+      connection: env.AUTH0_DB_CONNECTION, username, email: internalEmail,
+      email_verified: true, verify_email: false, password,
       user_metadata: { product: "hamed-smart-delivery" },
       app_metadata: { role: "driver" },
     }) as { user_id?: string };
