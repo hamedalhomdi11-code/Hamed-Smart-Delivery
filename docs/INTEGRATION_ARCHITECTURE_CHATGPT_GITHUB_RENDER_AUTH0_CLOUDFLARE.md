@@ -22,7 +22,7 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - User reports that repository secret CLOUDFLARE_API_TOKEN has been added. This is user-confirmed, not independently readable or verifiable by the assistant.
 - No Cloudflare deployment workflow has yet been verified in the repository.
 ### Render
-- Connected Render workspace: My Workspace (workspace ID recorded only in private tool context; do not publish credentials).
+- Connected Render workspace: My Workspace.
 - Existing Hamed Smart Delivery services observed:
   - hamed-smart-delivery-043-recovery-builder, branch feature/0.4.3-final-integrated-gps-20261128, free plan, auto-deploy off.
   - hamed-smart-delivery-043-final-builder, same branch, free plan, auto-deploy off.
@@ -99,12 +99,14 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - All material work is appended to the Activity Log.
 
 ## 8. Activity Log
-### 2026-11-28 — Initial integration discovery
-- GitHub: inspected README.md, docs/SYSTEM_ARCHITECTURE.md, docs/INTEGRATIONS.md, docs/ROADMAP.md, and .github/workflows/android-ci.yml on main.
-- GitHub: confirmed current Android CI builds/tests debug APK; no Cloudflare workflow was verified through the inspected files.
+### 2026-11-28 — Initial integration discovery and architecture publication
+- GitHub main: inspected README.md, docs/SYSTEM_ARCHITECTURE.md, docs/INTEGRATIONS.md, docs/ROADMAP.md, and .github/workflows/android-ci.yml.
+- GitHub: confirmed current Android CI builds/tests debug APK; no Cloudflare workflow was verified in the inspected workflow.
 - GitHub: user confirmed repository secret CLOUDFLARE_API_TOKEN was added. Secret value was not accessed.
 - Render: listed workspace services read-only. Identified three Hamed Smart Delivery builder services; no service changed or deployed.
 - Auth0: user reports account created; tenant/application/API metadata still missing.
 - Cloudflare: user reports account and API token created; Worker/D1 resources and deployment are not verified.
+- GitHub: created branch docs/integration-architecture-chatgpt-github-render-auth0-cloudflare-20261128 from main.
+- GitHub: created this unnumbered architecture document at docs/INTEGRATION_ARCHITECTURE_CHATGPT_GITHUB_RENDER_AUTH0_CLOUDFLARE.md on that branch; commit 6ff52456455c6ab6e7f8f45eac60ebfeba0641ac.
 - Boundary: Hamed Maps services and Riyadh database remain out of scope and untouched.
-- Next: create a dedicated documentation branch and record this architecture; then continue with branch/file inventory and controlled workflow design. No deployment or paid resource creation is authorized by this log.
+- Next: verify remaining repository workflow/configuration inventory, then prepare a validation-only Cloudflare workflow. Auth0 metadata and Cloudflare non-secret account/resource IDs are still required. No deployment, merge, or paid resource creation has been performed or authorized.
