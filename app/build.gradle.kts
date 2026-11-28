@@ -20,9 +20,11 @@ android {
         applicationId = "com.hamed.smartdelivery"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.4.3"
+        versionCode = 9
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["auth0Domain"] = "@string/com_auth0_domain"
+        manifestPlaceholders["auth0Scheme"] = "https"
     }
     signingConfigs {
         if (hasHamedReleaseKey) {
@@ -51,6 +53,7 @@ android {
 }
 
 dependencies {
+    implementation("com.auth0.android:auth0:4.3.1")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     androidTestImplementation(composeBom)
     implementation(composeBom)
