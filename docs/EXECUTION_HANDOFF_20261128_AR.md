@@ -37,7 +37,7 @@
 - أضيفت migration أولية للجداول: driver_accounts وadmin_devices وadmin_nonces وaudit_log.
 - أضيفت نقطة `GET /health`.
 - أضيفت `GET /v1/driver/session` للتحقق من Auth0 JWT باستخدام JWKS مع issuer وaudience وRS256، ثم التحقق من حالة الحساب وتواريخ الصلاحية باستخدام وقت الخادم.
-- نقاط إدارة الحسابات ما زالت مقفلة وتعيد 503 حتى اكتمال تسجيل جهاز الإدارة وربط Auth0 Management API.
+- تم تنفيذ نقاط Admin API لدخول الإدارة وإدارة السائقين. يتطلب إنشاء/تعديل مستخدمي Auth0 إعداد أسرار Management API وDatabase Connection كما في `docs/ADMIN_API_SETUP_REQUIRED_AR.md`.
 - database_id في wrangler.toml قيمة placeholder؛ workflow يستبدلها في بيئة التشغيل بعد العثور على D1 أو إنشائه.
 - Worker وD1 لم يُنشآ أو يُنشرا في Cloudflare بعد.
 
@@ -61,7 +61,7 @@
 4. لم يتم إنشاء Cloudflare Worker أو D1 أو تطبيق migration على السحابة.
 5. لم تُنشأ Auth0 Machine-to-Machine application ولا إعداد Management API اللازم لإنشاء/تعديل مستخدمي Auth0 من Admin API.
 6. لم يتم تأكيد اسم Database Connection في Auth0 أو أن username login مفعّل عليه.
-7. لم تُنفذ Admin device enrollment؛ يجب اعتماد طريقة تفعيل أولية آمنة للجهاز دون شاشة دخول تقليدية.
+7. تم اعتماد تسجيل دخول الإدارة باسم المستخدم وكلمة المرور دون pairing أو device enrollment؛ جلسة الإدارة opaque ومخزنة hash في D1 وتُحفظ على الجهاز مشفرة.
 8. لم تُنفذ endpoints لإضافة السائقين وتعديل كلمات المرور والصلاحيات وتعطيل الحساب وإعادة تفعيله وسجل التدقيق.
 9. لم تُنفذ سياسة offline 30 دقيقة وتصريح offline موقّع ومقاوم لتغيير ساعة الهاتف.
 10. لم تُستكمل واجهة معمارية 5 على جميع الشاشات؛ لوحة الإدارة الحالية shell أولي، وواجهة السائق تحتاج مراجعة بصرية واختبارات.
@@ -81,7 +81,7 @@
 2. تشغيل workflow اليدوي لنشر Worker وإنشاء D1 وتطبيق migration، بعد التأكد من وجود secret.
 3. فحص `/health` والتحقق من Worker وD1.
 4. إضافة Auth0 Management API credentials وDatabase Connection إلى Cloudflare Worker secrets.
-5. تنفيذ Admin device enrollment وآلية التوقيع والتحقق من replay.
+5. استكمال إعداد أسرار Auth0 Management API وDatabase Connection، ثم اختبار إنشاء/تعديل/تعطيل حسابات السائقين من APK الإدارة.
 6. تنفيذ Admin API لإنشاء حساب Auth0 وربطه بجدول driver_accounts، مع حساب المدة على الخادم (الأشهر تقويمية).
 7. تنفيذ API تعديل الصلاحيات والتعطيل/التفعيل وتغيير كلمة المرور وسجل التدقيق.
 8. ربط تطبيق الإدارة بالـAPI، وإزالة حالة تعطيل الحفظ بعد الاختبار الأمني.
