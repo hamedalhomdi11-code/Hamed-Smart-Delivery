@@ -100,7 +100,7 @@ jobs:
           const parts = result.access_token.split(".");
           if (parts.length !== 3) throw new Error("Auth0 Management token was not a JWT; granted scopes cannot be verified safely.");
           const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-          const scopes = new Set(String(payload.scope || "").split(/\\s+/).filter(Boolean));
+          const scopes = new Set(String(payload.scope || "").split(/\s+/).filter(Boolean));
           const required = ["create:users", "read:users", "update:users", "delete:users"];
           const missing = required.filter(scope => !scopes.has(scope));
           if (missing.length) throw new Error("Auth0 token is missing required scopes: " + missing.join(", "));
