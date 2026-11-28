@@ -350,8 +350,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         ))
     }
     // Do not mark the driver as searching until the foreground GPS service confirms it is active.
-    LaunchedEffect(pendingSearchAfterPermission, gpsMode) {
-        if (pendingSearchAfterPermission) {
+    LaunchedEffect(pendingSearchAfterPermission, gpsMode, hasLocationPermission) {
+        if (pendingSearchAfterPermission && hasLocationPermission) {
             if (gpsMode == GpsMode.TRACKING) {
                 val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.StartSearch)
                 if (transition.accepted) {
