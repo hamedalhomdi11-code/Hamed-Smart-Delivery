@@ -17,7 +17,7 @@ val hasHamedReleaseKey = !hamedKeystoreFile.isNullOrBlank() &&
 
 android {
     namespace = "com.hamed.smartdelivery"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.hamed.smartdelivery"
         minSdk = 26
