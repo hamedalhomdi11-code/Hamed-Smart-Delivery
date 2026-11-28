@@ -125,6 +125,7 @@ fun DriverAuthenticationGate(
                     .withConnection("Username-Password-Authentication")
                     .withAudience(BuildConfig.HAMED_API_AUDIENCE)
                     .withScope("openid profile email offline_access")
+                    .withParameter("prompt", "login")
                     .start(activity, object : Callback<Credentials, AuthenticationException> {
                         override fun onFailure(exception: AuthenticationException) {
                             signingIn = false
