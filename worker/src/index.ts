@@ -11,7 +11,6 @@ interface Env {
   ADMIN_USERNAME?: string;
   ADMIN_INITIAL_PASSWORD?: string;
   ADMIN_SESSION_DAYS?: string;
-  OFFLINE_SIGNING_PRIVATE_KEY?: string;
 }
 
 type AuthenticatedIdentity = { subject: string; claims: JWTPayload };
@@ -81,28 +80,6 @@ async function authenticate(request: Request, env: Env): Promise<AuthenticatedId
     return { subject: verified.payload.sub, claims: verified.payload };
   } catch { return json({ error: "invalid_access_token" }, 401); }
 }
-async function createOfflineAuthorization(env: Env, subject: string, username: string, serverTimeMs: number, validUntilMs: number): Promise<string | null> {
-  if (!env.OFFLINE_SIGNING_PRIVATE_KEY) return null;
-  try {
-    const pem = env.OFFLINE_SIGNING_PRIVATE_KEY.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, "");
-    const binary = atob(pem);
-    const der = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    const privateKey = await crypto.subtle.importKey("pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
-    const expiresAtMs = Math.min(serverTimeMs + 30 * 60 * 1000, validUntilMs);
-    const header = base64Url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
-    const payload = base64Url(new TextEncoder().encode(JSON.stringify({
-      iss: "hamed-smart-delivery-api", sub: subject, username, scope: "driver-offline",
-      iat: Math.floor(serverTimeMs / 1000), exp: Math.floor(expiresAtMs / 1000),
-      serverTimeMs, validUntilMs, jti: crypto.randomUUID(),
-    })));
-    const signingInput = header + "." + payload;
-    const signature = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", privateKey, new TextEncoder().encode(signingInput));
-    return signingInput + "." + base64Url(new Uint8Array(signature));
-  } catch {
-    return null;
-  }
-}
-
 async function driverSession(request: Request, env: Env): Promise<Response> {
   const identity = await authenticate(request, env);
   if (identity instanceof Response) return identity;
@@ -119,12 +96,11 @@ async function driverSession(request: Request, env: Env): Promise<Response> {
     if (now < account.valid_from_ms) return json({ error: "driver_account_not_started", validFromMs: account.valid_from_ms, serverTimeMs: now }, 403);
     if (now >= account.valid_until_ms) return json({ error: "driver_account_expired", validUntilMs: account.valid_until_ms, serverTimeMs: now }, 403);
     await env.DB.prepare("UPDATE driver_accounts SET last_auth_check_ms = ? WHERE id = ?").bind(now, account.id).run();
-    const offlineAuthorization = await createOfflineAuthorization(env, identity.subject, account.username, now, account.valid_until_ms);
     return json({
       authenticated: true, account: { id: account.id, username: account.username, status: account.status },
       serverTimeMs: now, validFromMs: account.valid_from_ms, validUntilMs: account.valid_until_ms,
-      offlineAuthorization,
-      offlineAuthorizationStatus: offlineAuthorization ? "active_30_minutes_max" : "signing_key_not_configured",
+      offlineAuthorization: null,
+      offlineAuthorizationStatus: "not_implemented",
     });
   } catch { return json({ error: "account_database_unavailable" }, 503); }
 }
