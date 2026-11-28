@@ -17,4 +17,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "HamedSmartDelivery"
-include(":app")
+include(":app", ":admin")
