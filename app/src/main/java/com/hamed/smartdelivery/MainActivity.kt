@@ -83,6 +83,8 @@ import com.hamed.smartdelivery.domain.DriverSnapshot
 import com.hamed.smartdelivery.domain.GpsMode
 import com.hamed.smartdelivery.domain.ClusterPolicy
 
+private var workSessionInitialized = false
+
 private val Night = Color(0xFF07111D)
 private val Panel = Color(0xFF101F2D)
 private val Mint = Color(0xFF5EF0C2)
@@ -247,9 +249,12 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         }
     }
     val restoredDriverMode = remember {
-        workflowPrefs.edit().remove("driver_mode").remove("last_command_id")
-            .remove("cluster_wait_started_at").remove("temporary_exclusions").apply()
-        writePersistedCluster(workflowPrefs, null)
+        if (!workSessionInitialized) {
+            workflowPrefs.edit().remove("driver_mode").remove("last_command_id")
+                .remove("cluster_wait_started_at").remove("temporary_exclusions").apply()
+            writePersistedCluster(workflowPrefs, null)
+            workSessionInitialized = true
+        }
         DriverMode.IDLE
     }
     var driverSnapshot by remember {
