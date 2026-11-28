@@ -16,13 +16,18 @@ if python3 database/sync_riyadh_wikidata.py data/output/hamed_smart_delivery_riy
 else
   echo '{"status":"unavailable","source":"Wikidata Query Service"}' > data/output/wikidata_sync.report.json
 fi
-if curl -L --fail --connect-timeout 20 --max-time 240 --retry 1 --retry-all-errors "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf" -o data/source/gcc-states-latest.osm.pbf && test -s data/source/gcc-states-latest.osm.pbf; then
-  osmium extract -b 46.20,24.05,47.35,25.15 data/source/gcc-states-latest.osm.pbf -o data/source/riyadh.osm.pbf --overwrite
-  osmium tags-filter data/source/riyadh.osm.pbf nwr/shop nwr/amenity nwr/healthcare nwr/education nwr/tourism nwr/leisure nwr/sport nwr/craft nwr/office nwr/public_transport nwr/highway=bus_stop,services nwr/railway nwr/emergency nwr/aeroway nwr/club -o data/source/riyadh-pois.osm.pbf --overwrite
-  osmium export data/source/riyadh-pois.osm.pbf --add-unique-id=type_id -o data/source/riyadh-pois.geojson --overwrite
-  python3 database/sync_riyadh_geofabrik.py data/output/hamed_smart_delivery_riyadh.sqlite data/source/riyadh-pois.geojson > data/output/osm_sync.report.json
+if curl -L --fail --connect-timeout 20 --max-time 240 --retry 1 --retry-all-errors "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf" -o data/source/gcc-states-latest.osm.pbf && test "$(stat -c%s data/source/gcc-states-latest.osm.pbf)" -gt 10000000; then
+  if osmium extract -b 46.20,24.05,47.35,25.15 data/source/gcc-states-latest.osm.pbf -o data/source/riyadh.osm.pbf --overwrite &&
+     osmium tags-filter data/source/riyadh.osm.pbf nwr/shop nwr/amenity nwr/healthcare nwr/education nwr/tourism nwr/leisure nwr/sport nwr/craft nwr/office nwr/public_transport nwr/highway=bus_stop,services nwr/railway nwr/emergency nwr/aeroway nwr/club -o data/source/riyadh-pois.osm.pbf --overwrite &&
+     osmium export data/source/riyadh-pois.osm.pbf --add-unique-id=type_id -o data/source/riyadh-pois.geojson --overwrite &&
+     python3 database/sync_riyadh_geofabrik.py data/output/hamed_smart_delivery_riyadh.sqlite data/source/riyadh-pois.geojson > data/output/osm_sync.report.json; then
+    echo "Geofabrik OSM import completed"
+  else
+    echo '{"status":"unavailable","source":"Geofabrik OSM","reason":"download or conversion failed"}' > data/output/osm_sync.report.json
+  fi
 else
-  echo '{"status":"unavailable","source":"Geofabrik OSM"}' > data/output/osm_sync.report.json
+  rm -f data/source/gcc-states-latest.osm.pbf
+  echo '{"status":"unavailable","source":"Geofabrik OSM","reason":"download missing or unexpectedly small"}' > data/output/osm_sync.report.json
 fi
 
 python3 database/derive_riyadh_restaurant_clusters.py data/output/hamed_smart_delivery_riyadh.sqlite data/output/restaurant_clusters.report.json
