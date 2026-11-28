@@ -223,8 +223,8 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
         if (speechReady) announcementsSpeech.language = if (english) Locale.US else Locale("ar", "SA")
     }
     DisposableEffect(announcementsSpeech) { onDispose { announcementsSpeech.stop(); announcementsSpeech.shutdown() } }
-    fun announceArabic(message: String) {
-        val spoken = if (!english) message else when (message) {
+    fun announceArabic(message: String, englishOverride: String? = null) {
+        val spoken = if (!english) message else englishOverride ?: when (message) {
             "مبروك إتمام المهمة بنجاح. حان الوقت للبحث عن الطلبات، جاري البحث" -> "Delivery completed successfully. Searching for new orders."
             "حامد سمارت دليفري يتمنى لكم يوماً مليئاً بالأرباح والطلبات. حان الوقت للبحث عن الطلبات، جاري البحث" -> "Hamed Smart Delivery wishes you a profitable day. Searching for orders."
             "تم استلام الطلب. توقف البحث مؤقتاً" -> "Order received. Order search is paused."
