@@ -293,13 +293,28 @@ async function createDriver(request: Request, env: Env): Promise<Response> {
   if (!Number.isInteger(durationValue) || durationValue < 1 || durationValue > 3650 || !["days", "weeks", "months"].includes(durationUnit)) {
     return json({ error: "duration_invalid" }, 400);
   }
-  const now = Date.now();
-  const validUntil = addDuration(now, durationValue, durationUnit);
-  let auth0UserId: string | null = null;
+
+  // Fail before creating an Auth0 identity if this username is already provisioned.
   try {
-    // Auth0 database connections configured for username sign-in require both
-    // username and email. Use a reserved .invalid address: it is unique per
-    // driver, cannot receive mail, and password resets remain administrator-led.
+    const existing = await env.DB.prepare("SELECT id FROM driver_accounts WHERE username = ? COLLATE NOCASE LIMIT 1")
+      .bind(username).first<{ id: string }>();
+    if (existing) return json({ error: "username_already_exists" }, 409);
+  } catch (error) {
+    console.error("driver_create_precheck_failed", { stage: "d1_username_precheck", error: error instanceof Error ? error.message.slice(0, 160) : "unknown_error" });
+    return json({ error: "driver_database_unavailable", stage: "d1_username_precheck" }, 503);
+  }
+
+  const now = Date.now();
+  let validUntil: number;
+  try { validUntil = addDuration(now, durationValue, durationUnit); }
+  catch { return json({ error: "duration_invalid" }, 400); }
+  let stage = "auth0_management_token";
+  let auth0UserId: string | null = null;
+  let driverId: string | null = null;
+  try {
+    if (!env.AUTH0_DB_CONNECTION) throw new Error("auth0_database_connection_not_configured");
+    stage = "auth0_create_user";
+    // Auth0 requires both username and email for username-enabled database connections.
     const internalEmail = `${username}@drivers.hamed-smart-delivery.invalid`;
     const user = await auth0Request(env, "users", "POST", {
       connection: env.AUTH0_DB_CONNECTION, username, email: internalEmail,
@@ -309,20 +324,46 @@ async function createDriver(request: Request, env: Env): Promise<Response> {
     }) as { user_id?: string };
     auth0UserId = user.user_id ?? null;
     if (!auth0UserId) throw new Error("auth0_user_id_missing");
-    const id = crypto.randomUUID();
+
+    stage = "d1_insert_driver";
+    driverId = crypto.randomUUID();
     await env.DB.prepare(
       "INSERT INTO driver_accounts (id, auth0_sub, username, status, valid_from_ms, valid_until_ms, duration_value, duration_unit, created_at_ms, updated_at_ms) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)",
-    ).bind(id, auth0UserId, username, now, validUntil, durationValue, durationUnit, now, now).run();
-    await audit(env, "driver_created", id, { username, durationValue, durationUnit, validUntil });
-    return json({ created: true, driver: { id, username, status: "active", validFromMs: now, validUntilMs: validUntil } }, 201);
+    ).bind(driverId, auth0UserId, username, now, validUntil, durationValue, durationUnit, now, now).run();
+
+    stage = "d1_write_audit";
+    await audit(env, "driver_created", driverId, { username, durationValue, durationUnit, validUntil });
+    return json({ created: true, driver: { id: driverId, username, status: "active", validFromMs: now, validUntilMs: validUntil } }, 201);
   } catch (error) {
-    if (auth0UserId) {
-      try { await auth0Request(env, `users/${encodeURIComponent(auth0UserId)}`, "DELETE"); } catch { /* best-effort rollback */ }
+    const message = error instanceof Error ? error.message : "unknown_error";
+    let rollbackD1 = "not_needed";
+    let rollbackAuth0 = "not_needed";
+    if (driverId) {
+      try {
+        await env.DB.prepare("DELETE FROM driver_accounts WHERE id = ?").bind(driverId).run();
+        rollbackD1 = "succeeded";
+      } catch { rollbackD1 = "failed"; }
     }
-    const message = error instanceof Error ? error.message : "driver_create_failed";
-    if (message.includes("auth0_management_api_not_configured")) return json({ error: message }, 503);
-    if (message.toLowerCase().includes("already exists") || message.includes("username")) return json({ error: "username_already_exists_or_auth0_rejected_it" }, 409);
-    return json({ error: "driver_create_failed", detail: message.slice(0, 180) }, 502);
+    if (auth0UserId) {
+      try {
+        await auth0Request(env, `users/${encodeURIComponent(auth0UserId)}`, "DELETE");
+        rollbackAuth0 = "succeeded";
+      } catch { rollbackAuth0 = "failed"; }
+    }
+    console.error("driver_create_failed", {
+      stage,
+      error: message.slice(0, 180),
+      rollbackD1,
+      rollbackAuth0,
+      usernameHash: await sha256(username),
+    });
+    if (message.includes("auth0_management_api_not_configured") || message.includes("auth0_database_connection_not_configured")) {
+      return json({ error: "auth0_management_api_not_configured", stage }, 503);
+    }
+    if (/already exists|username.*(taken|exists)|The user already exists/i.test(message)) {
+      return json({ error: "username_already_exists_or_auth0_rejected_it", stage }, 409);
+    }
+    return json({ error: "driver_create_failed", stage, detail: message.slice(0, 180), rollbackD1, rollbackAuth0 }, 502);
   }
 }
 async function updateDriver(request: Request, env: Env, id: string): Promise<Response> {
