@@ -125,14 +125,16 @@ fun DriverAuthenticationGate(
                     .withConnection("Username-Password-Authentication")
                     .withAudience(BuildConfig.HAMED_API_AUDIENCE)
                     .withScope("openid profile email offline_access")
+                    .withScheme("com.hamed.smartdelivery.auth0")
                     .withParameters(mapOf("prompt" to "login"))
                     .start(activity, object : Callback<Credentials, AuthenticationException> {
                         override fun onFailure(exception: AuthenticationException) {
                             signingIn = false
+                            val details = exception.message?.takeIf { it.isNotBlank() }
                             message = if (exception.isAuthenticationCanceled) {
-                                "تم إلغاء تسجيل الدخول."
+                                "لم يصل رد Auth0 إلى التطبيق. تحقق من تسجيل رابط الرجوع المخصص في إعدادات Auth0، أو أعد المحاولة."
                             } else {
-                                "تعذر تسجيل الدخول. تحقق من إعدادات Auth0 واتصال الإنترنت."
+                                "تعذر تسجيل الدخول${details?.let { ": $it" } ?: ". تحقق من إعدادات Auth0 واتصال الإنترنت."}"
                             }
                         }
 
