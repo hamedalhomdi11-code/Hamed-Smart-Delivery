@@ -122,6 +122,7 @@ fun DriverAuthenticationGate(
                 signingIn = true
                 message = "جارٍ فتح تسجيل الدخول الآمن"
                 WebAuthProvider.login(account)
+                    .withConnection("Username-Password-Authentication")
                     .withAudience(BuildConfig.HAMED_API_AUDIENCE)
                     .withScope("openid profile email offline_access")
                     .start(activity, object : Callback<Credentials, AuthenticationException> {
