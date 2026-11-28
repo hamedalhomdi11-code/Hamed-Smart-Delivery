@@ -41,7 +41,7 @@ class LocationTrackingService : Service(), LocationListener {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!fine && !coarse) {
-            setTrackingState(false)
+            setTrackingState(false, "إذن الموقع غير متاح. اسمح للتطبيق بالوصول إلى الموقع ثم حاول مجدداً.")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -63,7 +63,7 @@ class LocationTrackingService : Service(), LocationListener {
             }
             if (!requested) {
                 android.util.Log.e(TAG, "No enabled GPS or network location provider")
-                setTrackingState(false)
+                setTrackingState(false, "خدمة الموقع متوقفة أو لا يوجد مزود GPS/شبكة متاح. فعّل الموقع من إعدادات الهاتف.")
                 // Do not recreate an ongoing notification after removing the foreground session.
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -72,13 +72,13 @@ class LocationTrackingService : Service(), LocationListener {
             setTrackingState(true)
         } catch (error: SecurityException) {
             android.util.Log.e(TAG, "Location permission was revoked while starting GPS", error)
-            setTrackingState(false)
+            setTrackingState(false, "تعذر بدء GPS بسبب صلاحيات الموقع. راجع أذونات التطبيق.")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         } catch (error: IllegalArgumentException) {
             android.util.Log.e(TAG, "No usable location provider", error)
-            setTrackingState(false)
+            setTrackingState(false, "لا يوجد مزود موقع صالح على الهاتف. فعّل GPS وحاول مجدداً.")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -109,9 +109,12 @@ class LocationTrackingService : Service(), LocationListener {
         super.onDestroy()
     }
 
-    private fun setTrackingState(active: Boolean) {
+    private fun setTrackingState(active: Boolean, errorMessage: String? = null) {
         getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE).edit().putBoolean(KEY_ACTIVE, active).apply()
-        sendBroadcast(Intent(ACTION_TRACKING_STATE).setPackage(packageName).putExtra(EXTRA_TRACKING_ACTIVE, active))
+        val stateIntent = Intent(ACTION_TRACKING_STATE).setPackage(packageName)
+            .putExtra(EXTRA_TRACKING_ACTIVE, active)
+        if (!errorMessage.isNullOrBlank()) stateIntent.putExtra(EXTRA_TRACKING_ERROR, errorMessage)
+        sendBroadcast(stateIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -149,6 +152,7 @@ class LocationTrackingService : Service(), LocationListener {
         const val EXTRA_TIME = "time"
         const val EXTRA_PROVIDER = "provider"
         const val EXTRA_TRACKING_ACTIVE = "tracking_active"
+        const val EXTRA_TRACKING_ERROR = "tracking_error"
         const val PREFERENCES_NAME = "gps_tracking"
         const val KEY_ACTIVE = "active"
         private const val CHANNEL_ID = "driver_location"
