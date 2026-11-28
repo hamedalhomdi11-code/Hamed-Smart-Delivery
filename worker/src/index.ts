@@ -128,9 +128,22 @@ async function adminLogin(request: Request, env: Env): Promise<Response> {
   const username = typeof body?.username === "string" ? body.username.trim() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   if (!username || !password || username.length > 80 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
+  const ipHash = await sha256(request.headers.get("CF-Connecting-IP") ?? "unknown-client");
+  const now = Date.now();
+  const attempts = await env.DB.prepare("SELECT failures, window_started_ms, blocked_until_ms FROM admin_login_attempts WHERE ip_hash = ?")
+    .bind(ipHash).first<{ failures: number; window_started_ms: number; blocked_until_ms: number }>();
+  if (attempts?.blocked_until_ms && attempts.blocked_until_ms > now) return json({ error: "admin_login_rate_limited" }, 429);
   try {
     const ok = await bootstrapAdmin(env, username, password);
-    if (!ok) return json({ error: "invalid_credentials" }, 401);
+    if (!ok) {
+      const failures = attempts && now - attempts.window_started_ms < 15 * 60 * 1000 ? attempts.failures + 1 : 1;
+      const windowStarted = failures === 1 ? now : attempts!.window_started_ms;
+      const blockedUntil = failures >= 5 ? now + 15 * 60 * 1000 : 0;
+      await env.DB.prepare("INSERT INTO admin_login_attempts (ip_hash, failures, window_started_ms, blocked_until_ms) VALUES (?, ?, ?, ?) ON CONFLICT(ip_hash) DO UPDATE SET failures = excluded.failures, window_started_ms = excluded.window_started_ms, blocked_until_ms = excluded.blocked_until_ms")
+        .bind(ipHash, failures, windowStarted, blockedUntil).run();
+      return json({ error: failures >= 5 ? "admin_login_rate_limited" : "invalid_credentials" }, failures >= 5 ? 429 : 401);
+    }
+    await env.DB.prepare("DELETE FROM admin_login_attempts WHERE ip_hash = ?").bind(ipHash).run();
     const token = base64Url(randomBytes(32));
     const tokenHash = await sha256(token);
     const days = Math.min(90, Math.max(1, Number(env.ADMIN_SESSION_DAYS ?? "30") || 30));
