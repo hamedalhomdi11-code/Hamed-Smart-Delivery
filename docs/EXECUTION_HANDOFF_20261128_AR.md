@@ -191,3 +191,45 @@ npx wrangler dev
 - روابط التحقق:
   - Build both apps: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/actions/runs/46107744668
   - Android CI: https://github.com/hamedalhomdi11-code/Hamed-Smart-Delivery/actions/runs/46107744651
+
+
+## تحديث تنفيذ فعلي — 2026-11-28 (تفعيل واجهات الإدارة وربطها)
+
+### ما أضيف إلى فرع التنفيذ
+- استُبدل Worker الأولي بواجهة API تشمل:
+  - دخول الإدارة `POST /v1/admin/login` باسم المستخدم وكلمة المرور، دون رمز اقتران.
+  - اشتقاق كلمة مرور الإدارة PBKDF2-HMAC-SHA256 مع salt عشوائي وتخزين المشتق فقط في D1 عند أول دخول.
+  - جلسات عشوائية opaque مخزنة كـSHA-256 hashes في D1، مع إلغاء الجلسة وتوسيع صلاحيتها حتى 90 يوماً من آخر نشاط.
+  - تحديد معدل محاولات دخول الإدارة حسب IP (5 محاولات ثم حظر 15 دقيقة).
+  - عرض السائقين، إنشاء سائق في Auth0 Database Connection وربطه بجدول D1، تعديل المدة، التعطيل/التفعيل، وإعادة تعيين كلمة مرور السائق عبر Management API.
+  - تسجيل أحداث الإدارة في audit_log.
+  - فحص `/health` يتضمن استعلاماً فعلياً إلى D1.
+- أضيفت migrations:
+  - `0002_admin_accounts.sql`: بيانات اعتماد الإدارة وجلسات الإدارة.
+  - `0003_admin_login_rate_limit.sql`: سجل محاولات الدخول وتحديد المعدل.
+- أُعيد بناء واجهة تطبيق الإدارة لتتصل بالـAPI، وتعرض قائمة السائقين وإنشاء الحسابات وتعديل المدة والتفعيل/التعطيل.
+- تُحفظ جلسة الإدارة في Android EncryptedSharedPreferences المدعوم بـAndroid Keystore. لا توجد كلمة مرور ثابتة في APK.
+- ضبط اسم الإدارة `Hamed` ومدة الجلسة المتحركة حتى 90 يوماً.
+- تم ضبط عنوان Worker المتوقع افتراضياً في Gradle لتطبيقي السائق والإدارة، مع إبقاء إمكانية تجاوزه عبر متغير البيئة `HAMED_API_BASE_URL`.
+- أضيفت خطوة في Workflow النشر لتمرير أسرار الإدارة وAuth0 الاختيارية من GitHub Secrets إلى Cloudflare Worker Secrets دون طباعة قيمها.
+- أضيف ملف تعليمات الإعداد الخارجي `docs/ADMIN_API_SETUP_REQUIRED_AR.md`.
+
+### Commits التنفيذ
+- `b0f01a99e2eb7c7b9f30cd4484f586450e654533` — Admin API وAuth0 Management integration.
+- `785607479aa622c5e7a5318e35687fc1a9355951` — migration 0002.
+- `fa6449105212e5b5aa65ecf9987518979d3d313d` — ربط تطبيق الإدارة بالـAPI.
+- `6e838b8d82bff02b3fe7b4141f9510abdf96e538` — rate limiting.
+- `a85d514b09c90297e1a9920ae95d8dc41249edef` — migration 0003.
+- `ce3ac4ccdf65dcf54a9f51dfe1768fa9921a3461` — تمرير أسرار الإدارة/Auth0 الاختيارية وقت النشر.
+- `9adb95120bcd513f4af7f19d9c7bc4dfd3c83532` — إصلاح تسجيل الدخول بعد bootstrap وتحريك انتهاء الجلسة.
+- `b55afb91fdc039179d7ed7fa99c0bb8a9b855deb` — إعداد 90 يوماً للجلسة.
+
+### متطلبات لم تُنجز بعد / لا يجوز الادعاء بها
+- يجب على مالك الحساب إضافة GitHub Repository Secrets التالية بنفسه: `ADMIN_INITIAL_PASSWORD` (قيمتها الأولية المعتمدة `hamed1234`)، `AUTH0_MGMT_CLIENT_ID`، `AUTH0_MGMT_CLIENT_SECRET`، `AUTH0_DB_CONNECTION`. لا نملك إمكانية إنشاء/قراءة هذه الأسرار من GitHub connector ولا نطلب كشف قيمها.
+- يجب إنشاء Auth0 Machine-to-Machine Application ومنحه scopes `create:users read:users update:users delete:users`، وإعداد Database Connection يدعم username/password.
+- بعد إضافة الأسرار، شغّل Workflow نشر Cloudflare API ثم تحقق من `/health` و`/v1/admin/setup`. لا يوجد تأكيد حتى الآن أن أحدث deploy نجح.
+- لم تُنفذ بعد سياسة offline 30 دقيقة الموقعة والمقاومة لتغيير وقت الجهاز.
+- لم يتم بعد إثبات اختبار Auth0 login على جهاز حقيقي أو اختبار إنشاء حساب من APK الإدارة end-to-end.
+- لا تزال وظائف معمارية 4 والملاحة والتجمعات تحتاج اختبارات ميدانية؛ نجاح بناء APK لا يثبت سلوكها.
+- لا دمج إلى main، ولا تغيير قاعدة الرياض أو Render أو Hamed Maps.
+
