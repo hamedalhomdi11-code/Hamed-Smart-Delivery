@@ -257,6 +257,9 @@ async function getManagementToken(env: Env): Promise<string> {
       : "no_description";
     throw new Error(`auth0_token_http_${response.status}:${code}:${description}`);
   }
+  if (typeof data.expires_in !== "number" || !Number.isFinite(data.expires_in) || data.expires_in <= 0) {
+    throw new Error("auth0_token_response_invalid_expires_in");
+  }
   managementToken = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
   return data.access_token;
 }
