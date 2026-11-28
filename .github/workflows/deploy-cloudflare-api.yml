@@ -30,18 +30,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler d1 list --json > /tmp/hamed-d1-list.json
-          DB_ID="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/hamed-d1-list.json","utf8"));const a=Array.isArray(x)?x:(x.result||x.databases||[]);const d=a.find(v=>(v.name||v.database_name)==="hamed-smart-delivery-accounts");if(d)process.stdout.write(d.uuid||d.database_id||"");')"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API" > /tmp/hamed-d1-list.json
+          DB_ID="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/hamed-d1-list.json","utf8"));if(!x.success)throw new Error(JSON.stringify(x.errors));const d=(x.result||[]).find(v=>v.name==="hamed-smart-delivery-accounts");if(d)process.stdout.write(d.uuid);')"
           if [ -z "$DB_ID" ]; then
-            npx wrangler d1 create hamed-smart-delivery-accounts --json > /tmp/hamed-d1-create.json
-            DB_ID="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/hamed-d1-create.json","utf8"));process.stdout.write(x.uuid||x.result?.uuid||x.database_id||"");')"
+            curl -fsS -X POST "$API" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data '{"name":"hamed-smart-delivery-accounts"}' > /tmp/hamed-d1-create.json
+            DB_ID="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/hamed-d1-create.json","utf8"));if(!x.success)throw new Error(JSON.stringify(x.errors));process.stdout.write(x.result.uuid);')"
           fi
           if [ -z "$DB_ID" ]; then
             echo "Could not determine the dedicated D1 database ID."
             exit 1
           fi
           node -e 'const fs=require("fs");const p="wrangler.toml";const id=process.argv[1];const s=fs.readFileSync(p,"utf8");if(!s.includes("00000000-0000-0000-0000-000000000000"))throw new Error("Expected database ID placeholder missing");fs.writeFileSync(p,s.replace("00000000-0000-0000-0000-000000000000",id));' "$DB_ID"
-          echo "D1 database is ready; its identifier is intentionally not printed."
+          echo "Dedicated D1 database is ready; its identifier is intentionally not printed."
       - name: Type-check Worker
         run: npm run typecheck
       - name: Apply D1 migrations
