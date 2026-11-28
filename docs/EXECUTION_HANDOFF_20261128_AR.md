@@ -169,7 +169,7 @@ npx wrangler dev
 - تشغيل `Build Hamed Smart Delivery Apps` رقم `46107418526` كان لا يزال ينفذ خطوة بناء/اختبار التطبيقين؛ لم نثبت بعد نجاح APK الإدارة في هذا التشغيل.
 
 ### بيانات دخول تطبيق الإدارة
-- طلب المستخدم اعتماد اسم المستخدم الأولي `Hamed` وكلمة المرور `hamed1234` مع الاحتفاظ بالجلسة بعد أول دخول.
+- طلب المستخدم اعتماد اسم المستخدم الأولي `Hamed` وكلمة المرور كلمة المرور الأولية التي اعتمدها المالك (تُدخل مباشرة في GitHub Secret فقط) مع الاحتفاظ بالجلسة بعد أول دخول.
 - لا يجوز تضمين كلمة المرور كنص صريح في APK أو Git. يجب تنفيذ تحقق خادمي، وتخزين مشتق آمن لكلمة المرور، وحفظ رمز الجلسة محلياً عبر تخزين Android آمن.
 - واجهة الإدارة الحالية ما زالت نموذجاً أولياً؛ إنشاء حسابات السائقين وأوامر الإدارة غير مفعلة. لم يتم بعد بناء نظام تسجيل دخول الإدارة أو واجهات إدارة Auth0/السائقين.
 
@@ -225,7 +225,7 @@ npx wrangler dev
 - `b55afb91fdc039179d7ed7fa99c0bb8a9b855deb` — إعداد 90 يوماً للجلسة.
 
 ### متطلبات لم تُنجز بعد / لا يجوز الادعاء بها
-- يجب على مالك الحساب إضافة GitHub Repository Secrets التالية بنفسه: `ADMIN_INITIAL_PASSWORD` (قيمتها الأولية المعتمدة `hamed1234`)، `AUTH0_MGMT_CLIENT_ID`، `AUTH0_MGMT_CLIENT_SECRET`، `AUTH0_DB_CONNECTION`. لا نملك إمكانية إنشاء/قراءة هذه الأسرار من GitHub connector ولا نطلب كشف قيمها.
+- يجب على مالك الحساب إضافة GitHub Repository Secrets التالية بنفسه: `ADMIN_INITIAL_PASSWORD` (قيمتها الأولية المعتمدة كلمة المرور الأولية التي اعتمدها المالك (تُدخل مباشرة في GitHub Secret فقط))، `AUTH0_MGMT_CLIENT_ID`، `AUTH0_MGMT_CLIENT_SECRET`، `AUTH0_DB_CONNECTION`. لا نملك إمكانية إنشاء/قراءة هذه الأسرار من GitHub connector ولا نطلب كشف قيمها.
 - يجب إنشاء Auth0 Machine-to-Machine Application ومنحه scopes `create:users read:users update:users delete:users`، وإعداد Database Connection يدعم username/password.
 - بعد إضافة الأسرار، شغّل Workflow نشر Cloudflare API ثم تحقق من `/health` و`/v1/admin/setup`. لا يوجد تأكيد حتى الآن أن أحدث deploy نجح.
 - لم تُنفذ بعد سياسة offline 30 دقيقة الموقعة والمقاومة لتغيير وقت الجهاز.
