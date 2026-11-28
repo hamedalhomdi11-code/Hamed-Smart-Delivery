@@ -1166,7 +1166,7 @@ private fun MapAction(icon: androidx.compose.ui.graphics.vector.ImageVector, onC
 }
 
 @Composable
-private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingSeconds: Int, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
+private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingSeconds: Int, onEndWork: () -> Unit, onManualSwitch: () -> Unit, onResetExclusions: () -> Unit, onCommand: (DriverCommand) -> Unit) {
     val mode = snapshot.mode
     val title = when (mode) {
         DriverMode.IDLE -> if (english) "Ready" else "جاهز للبحث"
@@ -1229,6 +1229,16 @@ private fun Dashboard(snapshot: DriverSnapshot, english: Boolean, waitRemainingS
             }
             Spacer(Modifier.height(5.dp))
             Text(if (english) "The app keeps searching between suitable clusters automatically." else "يستمر التطبيق في البحث والتنقل بين التجمعات تلقائياً.", color = Muted, fontSize = 10.sp)
+        }
+        if (mode == DriverMode.SEARCHING || mode == DriverMode.ORDER_RECEIVED) {
+            OutlinedButton(
+                onClick = onEndWork,
+                modifier = Modifier.fillMaxWidth().height(37.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF8A80))
+            ) {
+                Text(if (english) "END WORK" else "انتهاء العمل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
