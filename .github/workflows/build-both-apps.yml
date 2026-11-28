@@ -17,6 +17,27 @@ jobs:
       HAMED_API_BASE_URL: ${{ vars.HAMED_API_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
+      - name: Download and verify the latest Riyadh database
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow build-riyadh-database.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          test -n "$RUN_ID" || { echo "::error::No successful Riyadh database workflow run was found"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/riyadh-database" app/src/main/assets
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name hamed-smart-delivery-riyadh-database --dir "$RUNNER_TEMP/riyadh-database"
+          DB_FILE="$(find "$RUNNER_TEMP/riyadh-database" -type f -name hamed_smart_delivery_riyadh.sqlite -print -quit)"
+          test -n "$DB_FILE" || { echo "::error::SQLite database missing from downloaded artifact"; exit 1; }
+          python3 - "$DB_FILE" <<'PY'
+          import sqlite3, sys
+          db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+          assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+          assert db.execute("SELECT COUNT(*) FROM food_density_clusters_v3").fetchone()[0] > 0
+          assert db.execute("SELECT COUNT(*) FROM places WHERE category='pharmacy' AND is_active=1").fetchone()[0] > 0
+          print("Riyadh database integrity and required tables verified")
+          db.close()
+          PY
+          cp "$DB_FILE" app/src/main/assets/hamed_smart_delivery_riyadh.sqlite
+          sha256sum app/src/main/assets/hamed_smart_delivery_riyadh.sqlite
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
