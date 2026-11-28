@@ -959,26 +959,34 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                         }
                         val now = System.currentTimeMillis()
                         if (nearestDistance > 85f && now - lastRerouteAt > 20000L) {
-                            lastRerouteAt = now
-                            routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
-                            scope.launch {
-                                val updated = withContext(Dispatchers.IO) {
-                                    OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
-                                }
-                                if (updated != null && updated.points.size > 1) {
-                                    displayedRoutePolyline?.let { map.removePolyline(it) }
-                                displayedRoutePolyline = null
-                                    displayedRoutePolyline = map.addPolyline(
-                                        PolylineOptions().addAll(updated.points)
-                                            .color(AndroidColor.rgb(166, 187, 205))
-                                            .width(6f)
-                                    )
-                                    routePoints = updated.points
-                                    alertRouteChanged(context, latestSoundAlertsEnabled, latestVibrationAlertsEnabled)
-                                    onRouteChanged()
-                                    routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
-                                } else {
-                                    routeStatus = "تعذر تحديث المسار حالياً"
+                            val rerouteDestination = activeDestination
+                            if (rerouteDestination != null) {
+                                lastRerouteAt = now
+                                routeStatus = "خرجت عن المسار • جارٍ إعادة التوجيه"
+                                val rerouteRequestId = searchRequestId
+                                routeJob = scope.launch {
+                                    val updated = withContext(Dispatchers.IO) {
+                                        OsrmRouteClient.fetchRoute(
+                                            location.latitude, location.longitude,
+                                            rerouteDestination.latitude, rerouteDestination.longitude
+                                        )
+                                    }
+                                    if (isActive && rerouteRequestId == searchRequestId &&
+                                        activeDestination == rerouteDestination && updated != null && updated.points.size > 1) {
+                                        displayedRoutePolyline?.let { map.removePolyline(it) }
+                                        displayedRoutePolyline = map.addPolyline(
+                                            PolylineOptions().addAll(updated.points)
+                                                .color(AndroidColor.rgb(166, 187, 205))
+                                                .width(6f)
+                                        )
+                                        routePoints = updated.points
+                                        alertRouteChanged(context, latestSoundAlertsEnabled, latestVibrationAlertsEnabled)
+                                        onRouteChanged()
+                                        routeStatus = "تم تحديث المسار • " + (updated.distanceMeters / 1000.0).toInt() + " كم"
+                                    } else if (isActive && rerouteRequestId == searchRequestId &&
+                                        activeDestination == rerouteDestination) {
+                                        routeStatus = "تعذر تحديث المسار حالياً"
+                                    }
                                 }
                             }
                         }
