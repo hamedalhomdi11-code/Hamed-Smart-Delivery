@@ -12,3 +12,4 @@ binding = "DB"
 database_name = "hamed-smart-delivery-accounts"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+# Account workers.dev subdomain confirmed: hamedalhomdi11.workers.dev
