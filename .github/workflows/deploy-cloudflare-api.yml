@@ -1,6 +1,12 @@
 name: Deploy Hamed Smart Delivery API to Cloudflare
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/implementation-4-5-6-integration-20261128
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy-cloudflare-api.yml"
 permissions:
   contents: read
 jobs:
@@ -36,7 +42,7 @@ jobs:
           fi
           node -e 'const fs=require("fs");const p="wrangler.toml";const id=process.argv[1];const s=fs.readFileSync(p,"utf8");if(!s.includes("00000000-0000-0000-0000-000000000000"))throw new Error("Expected database ID placeholder missing");fs.writeFileSync(p,s.replace("00000000-0000-0000-0000-000000000000",id));' "$DB_ID"
           echo "D1 database is ready; its identifier is intentionally not printed."
-      - name: Apply D1 migrations
+      - name: Type-check Worker\n        run: npm run typecheck\n      - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply hamed-smart-delivery-accounts --remote --config wrangler.toml
       - name: Deploy Worker
         run: npx wrangler deploy --config wrangler.toml
