@@ -13,6 +13,9 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "0.2.0"
+        // Auth0.Android uses HTTPS Android App Links for the verified callback URI.
+        manifestPlaceholders["auth0Domain"] = "@string/com_auth0_domain"
+        manifestPlaceholders["auth0Scheme"] = "https"
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -23,6 +26,8 @@ android {
 }
 
 dependencies {
+    // Auth0 native authentication (Authorization Code + PKCE; no client secret in the APK).
+    implementation("com.auth0.android:auth0:4.3.1")
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     androidTestImplementation(composeBom)
     implementation(composeBom)
