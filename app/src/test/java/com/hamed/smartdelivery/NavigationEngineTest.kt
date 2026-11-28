@@ -19,24 +19,16 @@ class NavigationEngineTest {
 
     @Test
     fun routeDeviationTriggersForAccurateMovingFixFarFromRoute() {
-        val location = android.location.Location("test").apply {
-            latitude = 24.01
-            longitude = 46.005
-            speed = 12f
-            accuracy = 8f
-        }
         val match = RouteMatch(LatLng(24.01, 46.005), 1_100.0, 500.0, 0)
-        assertTrue(RouteDeviationPolicy.shouldReroute(match, location))
+        assertTrue(RouteDeviationPolicy.shouldReroute(match, 12.0, 8.0))
     }
 
     @Test
     fun routeDeviationIgnoresSlowOrInaccurateGpsFixes() {
         val match = RouteMatch(LatLng(24.01, 46.005), 1_100.0, 500.0, 0)
-        val slow = android.location.Location("test").apply { speed = 0.5f; accuracy = 5f }
-        val inaccurate = android.location.Location("test").apply { speed = 8f; accuracy = 120f }
-        assertTrue(!RouteDeviationPolicy.shouldReroute(match, slow))
-        assertTrue(!RouteDeviationPolicy.shouldReroute(match, inaccurate))
-        assertTrue(!RouteDeviationPolicy.shouldReroute(null, slow))
+        assertTrue(!RouteDeviationPolicy.shouldReroute(match, 0.5, 5.0))
+        assertTrue(!RouteDeviationPolicy.shouldReroute(match, 8.0, 120.0))
+        assertTrue(!RouteDeviationPolicy.shouldReroute(null, 8.0, 5.0))
     }
 
     @Test
