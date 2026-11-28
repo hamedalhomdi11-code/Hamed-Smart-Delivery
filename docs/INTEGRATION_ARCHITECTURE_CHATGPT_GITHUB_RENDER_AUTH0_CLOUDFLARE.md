@@ -158,3 +158,12 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Verified applicationId remains com.hamed.smartdelivery from the repository's app/build.gradle.kts inspection.
 - No callback/logout URLs or application code were changed yet. The exact URL will be added only after the SDK configuration convention is selected and matched to the app's manifest placeholders.
 - Next: inspect the current Android Gradle and manifest configuration on the dedicated project branch, then propose the exact Allowed Callback URLs and Allowed Logout URLs for user confirmation before editing Auth0 settings.
+
+
+### 2026-11-28 — Auth0 Android callback/logout URI derived from repository configuration
+- Re-inspected app/build.gradle.kts and app/src/main/AndroidManifest.xml on main (read-only).
+- Confirmed applicationId com.hamed.smartdelivery, minSdk 26, Java 17; current manifest has no Auth0 callback intent filter or Auth0 manifest placeholders configured.
+- Reviewed the current Auth0.Android SDK README. Its default https callback/logout URI pattern is https://{AUTH0_DOMAIN}/android/{APPLICATION_ID}/callback; the SDK also requires matching manifest placeholders. Auth0 recommends Android App Links where feasible.
+- Derived the candidate URI for both Allowed Callback URLs and Allowed Logout URLs: https://dev-sm0yv5i1vy4kqhz8.us.auth0.com/android/com.hamed.smartdelivery/callback.
+- This URI is a proposed dashboard value, not yet entered or tested. No application source, manifest, Auth0 dashboard setting, or deployment was changed.
+- Next: have the user add the exact URI to both Allowed Callback URLs and Allowed Logout URLs in the Native application's settings, then implement matching Auth0 SDK dependency/configuration on a dedicated code branch and test the redirect.
