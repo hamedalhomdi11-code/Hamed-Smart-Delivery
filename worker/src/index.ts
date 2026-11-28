@@ -246,8 +246,17 @@ async function getManagementToken(env: Env): Promise<string> {
       scope: env.AUTH0_MGMT_SCOPE?.trim() || "create:users read:users update:users delete:users",
     }),
   });
-  if (!response.ok) throw new Error("auth0_management_token_failed");
-  const data = await response.json() as { access_token: string; expires_in: number };
+  const data = await response.json().catch(() => ({})) as {
+    access_token?: string; expires_in?: number; error?: string; error_description?: string;
+  };
+  if (!response.ok || !data.access_token) {
+    // Surface only Auth0's non-secret error code/description to diagnose M2M setup.
+    const code = typeof data.error === "string" ? data.error.slice(0, 60) : "unknown_error";
+    const description = typeof data.error_description === "string"
+      ? data.error_description.replace(/[\\r\\n]+/g, " ").slice(0, 140)
+      : "no_description";
+    throw new Error(`auth0_token_http_${response.status}:${code}:${description}`);
+  }
   managementToken = { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
   return data.access_token;
 }
