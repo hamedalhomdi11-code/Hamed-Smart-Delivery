@@ -167,3 +167,13 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Derived the candidate URI for both Allowed Callback URLs and Allowed Logout URLs: https://dev-sm0yv5i1vy4kqhz8.us.auth0.com/android/com.hamed.smartdelivery/callback.
 - This URI is a proposed dashboard value, not yet entered or tested. No application source, manifest, Auth0 dashboard setting, or deployment was changed.
 - Next: have the user add the exact URI to both Allowed Callback URLs and Allowed Logout URLs in the Native application's settings, then implement matching Auth0 SDK dependency/configuration on a dedicated code branch and test the redirect.
+
+
+### 2026-11-28 — Auth0 Native app display name corrected; HTTPS callback/logout saved by user
+- User clarified the exact Auth0 Native application display name shown in the dashboard: "My AppHamed Smart Delivery Android" (not "Hamed Smart Delivery Android"). The earlier display-name wording is superseded; Client ID remains rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
+- User confirmed the following exact URI has been entered and saved in both Allowed Callback URLs and Allowed Logout URLs for that Native application: https://dev-sm0yv5i1vy4kqhz8.us.auth0.com/android/com.hamed.smartdelivery/callback.
+- Re-verified the current official Auth0.Android SDK README: the current SDK line is 4.3.1; it documents Android API 26+ and Java 17+, the same HTTPS callback/logout URI pattern, and Gradle manifest placeholders auth0Domain and auth0Scheme=https. The repository app already meets the SDK minimum requirements (minSdk 26, Java 17).
+- Current Auth0.Android documentation recommends HTTPS Android App Links where possible; the library registers the matching redirect intent filter using the manifest placeholders. We will use the SDK's documented HTTPS configuration, not an invented custom scheme.
+- The user's URL is consistent with the SDK format and matches the verified applicationId. It has not yet been tested end-to-end on a device.
+- No Android source, Gradle configuration, Auth0 dashboard settings, Cloudflare resources, Render services, or production data were modified in this step.
+- Next: add the Auth0.Android dependency and matching manifest placeholders/resources on a dedicated code branch; then implement the login/session flow only after aligning it with Architecture 6 and testing callback handling. Do not merge to main or build an APK without user approval.
