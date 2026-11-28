@@ -183,7 +183,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         MapLibre.getInstance(this)
         sharedDestination = parseSharedDestination(intent)
-        setContent { DriverAuthenticationGate(this@MainActivity) { HamedApp(sharedDestination) } }
+        setContent {
+            if (BuildConfig.AUTH_REQUIRED) {
+                DriverAuthenticationGate(this@MainActivity) { HamedApp(sharedDestination) }
+            } else {
+                HamedApp(sharedDestination)
+            }
+        }
     }
 
     override fun onResume() {
