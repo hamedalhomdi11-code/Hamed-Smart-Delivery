@@ -5,7 +5,7 @@ workers_dev = true
 
 [vars]
 ADMIN_USERNAME = "Hamed"
-ADMIN_SESSION_DAYS = "30"
+ADMIN_SESSION_DAYS = "90"
 AUTH0_DOMAIN = "dev-sm0yv5i1vy4kqhz8.us.auth0.com"
 AUTH0_AUDIENCE = "https://hamed-smart-delivery-api"
 
