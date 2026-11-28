@@ -18,6 +18,19 @@ val hasHamedReleaseKey = !hamedKeystoreFile.isNullOrBlank() &&
 android {
     namespace = "com.hamed.smartdelivery"
     compileSdk = 36
+    flavorDimensions += "access"
+    productFlavors {
+        create("authenticated") {
+            dimension = "access"
+            buildConfigField("boolean", "AUTH_REQUIRED", "true")
+        }
+        create("guest") {
+            dimension = "access"
+            applicationIdSuffix = ".guest"
+            versionNameSuffix = "-guest"
+            buildConfigField("boolean", "AUTH_REQUIRED", "false")
+        }
+    }
     defaultConfig {
         applicationId = "com.hamed.smartdelivery"
         minSdk = 26
