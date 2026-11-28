@@ -73,7 +73,9 @@ private class AdminApi(context: Context) {
                 val json = if (response.isBlank()) JSONObject() else JSONObject(response)
                 if (code !in 200..299) {
                     val error = json.optString("error", "HTTP " + code)
-                    throw IllegalStateException(errorMessage(error, code))
+                    val stage = json.optString("stage", "")
+                    val detail = json.optString("detail", "")
+                    throw IllegalStateException(errorMessage(error, code, stage, detail))
                 }
                 json
             } finally { connection.disconnect() }
@@ -102,15 +104,32 @@ private class AdminApi(context: Context) {
         runCatching { request("/v1/admin/logout", "POST", JSONObject()) }
         clearToken()
     }
-    private fun errorMessage(error: String, code: Int): String = when (error) {
-        "admin_bootstrap_secret_not_configured" -> "لم يتم إعداد كلمة مرور الإدارة في أسرار Cloudflare بعد."
-        "invalid_credentials" -> "اسم المستخدم أو كلمة المرور غير صحيحة."
-        "admin_session_expired" -> "انتهت جلسة الإدارة. سجّل الدخول مرة أخرى."
-        "auth0_management_api_not_configured" -> "إعداد Auth0 Management API أو اتصال قاعدة المستخدمين غير مكتمل."
-        "username_already_exists_or_auth0_rejected_it" -> "اسم المستخدم مستخدم مسبقاً أو رفضه Auth0."
-        "driver_password_must_be_at_least_10_characters" -> "كلمة مرور السائق يجب ألا تقل عن 10 أحرف."
-        "username_format_invalid" -> "صيغة اسم المستخدم غير صحيحة."
-        else -> error + " (HTTP " + code + ")"
+    private fun errorMessage(error: String, code: Int, stage: String = "", detail: String = ""): String {
+        val stageLabel = when (stage) {
+            "auth0_management_token" -> "الحصول على رمز إدارة Auth0"
+            "auth0_create_user" -> "إنشاء هوية السائق في Auth0"
+            "d1_username_precheck" -> "فحص اسم المستخدم في قاعدة البيانات"
+            "d1_insert_driver" -> "حفظ السائق في D1"
+            "d1_write_audit" -> "تسجيل عملية الإنشاء"
+            else -> stage
+        }
+        val message = when (error) {
+            "admin_bootstrap_secret_not_configured" -> "لم يتم إعداد كلمة مرور الإدارة في أسرار Cloudflare بعد."
+            "invalid_credentials" -> "اسم المستخدم أو كلمة المرور غير صحيحة."
+            "admin_session_expired" -> "انتهت جلسة الإدارة. سجّل الدخول مرة أخرى."
+            "auth0_management_api_not_configured" -> "إعداد Auth0 Management API أو اتصال قاعدة المستخدمين غير مكتمل."
+            "username_already_exists_or_auth0_rejected_it", "username_already_exists" -> "اسم المستخدم مستخدم مسبقاً أو رفضه Auth0."
+            "driver_database_unavailable" -> "تعذر الوصول إلى قاعدة بيانات السائقين."
+            "driver_password_must_be_at_least_10_characters" -> "كلمة مرور السائق يجب ألا تقل عن 10 أحرف."
+            "username_format_invalid" -> "صيغة اسم المستخدم غير صحيحة."
+            "duration_invalid" -> "مدة الصلاحية غير صحيحة."
+            else -> error + " (HTTP " + code + ")"
+        }
+        return buildString {
+            append(message)
+            if (stageLabel.isNotBlank()) append("\\nالمرحلة: ").append(stageLabel)
+            if (detail.isNotBlank()) append("\\nتفاصيل الخادم: ").append(detail.take(180))
+        }
     }
 }
 
