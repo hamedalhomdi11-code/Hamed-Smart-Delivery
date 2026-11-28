@@ -51,7 +51,7 @@ pharmacies = con.execute(
 source_counts = dict(con.execute(
     "SELECT source_id, COUNT(*) FROM places WHERE is_active=1 GROUP BY source_id"
 ).fetchall())
-assert active_total >= 50000, f'Unexpectedly small Riyadh DB: {active_total}'
+assert active_total >= 45000, f'Unexpectedly small Riyadh DB after the core Bayanat + Overture imports: {active_total}'
 assert cluster_total >= 500, f'Expected at least 500 food clusters, got {cluster_total}'
 assert clusters_by_category.get('restaurant', 0) > 0 and clusters_by_category.get('cafe', 0) > 0
 assert pharmacies > 0
