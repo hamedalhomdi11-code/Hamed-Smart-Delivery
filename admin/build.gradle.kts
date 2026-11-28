@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "").trim().trimEnd('/')
+val hamedApiBaseUrl = (System.getenv("HAMED_API_BASE_URL") ?: "https://hamed-smart-delivery-api.hamedalhomdi11.workers.dev").trim().trimEnd('/')
 
 android {
     namespace = "com.hamed.smartdelivery.admin"
@@ -37,5 +37,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
