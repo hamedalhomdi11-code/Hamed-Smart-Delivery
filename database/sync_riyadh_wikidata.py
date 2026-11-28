@@ -67,19 +67,19 @@ def main():
     }} LIMIT 10000
     """
     response = None
-    for attempt in range(4):
+    for attempt in range(2):
         try:
             response = requests.get(
                 ENDPOINT, params={"query": query, "format": "json"},
                 headers={"User-Agent": USER_AGENT, "Accept": "application/sparql-results+json"},
-                timeout=(20, 180)
+                timeout=(15, 60)
             )
             response.raise_for_status()
             break
         except requests.RequestException:
-            if attempt == 3:
+            if attempt == 1:
                 raise
-            time.sleep(5 * (attempt + 1))
+            time.sleep(5)
     bindings = response.json().get("results", {}).get("bindings", [])
     con = sqlite3.connect(db_path)
     con.execute("PRAGMA foreign_keys=ON")
