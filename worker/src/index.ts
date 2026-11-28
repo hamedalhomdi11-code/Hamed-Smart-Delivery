@@ -123,7 +123,7 @@ async function bootstrapAdmin(env: Env, username: string, password: string): Pro
   return true;
 }
 async function adminLogin(request: Request, env: Env): Promise<Response> {
-  if (!env.ADMIN_USERNAME || !env.ADMIN_INITIAL_PASSWORD) return json({ error: "admin_bootstrap_secret_not_configured" }, 503);
+  if (!env.ADMIN_USERNAME) return json({ error: "admin_username_not_configured" }, 503);
   const body = await readJson(request);
   const username = typeof body?.username === "string" ? body.username.trim() : "";
   const password = typeof body?.password === "string" ? body.password : "";
