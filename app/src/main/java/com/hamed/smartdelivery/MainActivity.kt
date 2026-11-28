@@ -921,25 +921,29 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             }
                         }
                     }
-                    if (activeDestination != null && !routeRequested) {
+                    val pendingDestination = activeDestination
+                    if (pendingDestination != null && !routeRequested) {
                         routeRequested = true
                         routeStatus = "جارٍ حساب المسار"
-                        scope.launch {
+                        val routeRequestId = searchRequestId
+                        routeJob = scope.launch {
                             val route = withContext(Dispatchers.IO) {
-                                OsrmRouteClient.fetchRoute(location.latitude, location.longitude, activeDestination!!.latitude, activeDestination!!.longitude)
+                                OsrmRouteClient.fetchRoute(
+                                    location.latitude, location.longitude,
+                                    pendingDestination.latitude, pendingDestination.longitude
+                                )
                             }
-                            if (route != null && route.points.size > 1) {
+                            if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination &&
+                                route != null && route.points.size > 1) {
                                 displayedRoutePolyline?.let { map.removePolyline(it) }
-                                displayedRoutePolyline = null
                                 displayedRoutePolyline = map.addPolyline(
                                     PolylineOptions().addAll(route.points)
                                         .color(AndroidColor.rgb(166, 187, 205))
                                         .width(6f)
                                 )
                                 routePoints = route.points
-                                routeStatus = "تم رسم المسار"
                                 routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
-                            } else {
+                            } else if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination) {
                                 routeRequested = false
                                 routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
                             }
