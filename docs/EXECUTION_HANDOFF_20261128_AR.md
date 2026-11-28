@@ -135,3 +135,22 @@ npx wrangler dev
 
 ## 9. الحالة عند آخر تحديث
 **العمل مستمر وغير مكتمل.** آخر commit موثق عند تحديث السجل هو `f6d1872891c052369b1322b7e65a3d735f7c25f0` (تحديث Gradle لتطبيق الإدارة؛ راجع commits أدناه). أُضيف إعداد عنوان API من متغير GitHub Actions `HAMED_API_BASE_URL` إلى كلا التطبيقين. لم يتم تأكيد نتيجة البناء، ولم يتم نشر Worker أو إنشاء D1، ولم يتم دمج أي شيء إلى `main`.
+
+## 10. متابعة التنفيذ والتحقق — 2026-11-28
+- عولج خطأ Android CI المثبت في السجل: مكتبة `androidx.browser:1.10.0` تتطلب compileSdk 36؛ تم رفع `compileSdk` للتطبيقين إلى 36 مع إبقاء targetSdk=35، وتحديث تثبيت Android SDK إلى platform/build-tools 36.
+- محاولات التحقق على GitHub Actions:
+  - فشل البناء السابق عند `checkDebugAarMetadata` بسبب compileSdk 35، وتم تصحيح ذلك في commits اللاحقة.
+  - تشغيل Android CI على commit `1de5bff79f1dee934daab87684c741437683332b` كان جارياً عند آخر مراجعة، ولم تظهر نتيجة نهائية بعد.
+  - تشغيل Android CI على commit `38f43049619ef7945147f79c7fccad26fc9e5639` كان جارياً عند آخر مراجعة، ولم تظهر نتيجة نهائية بعد.
+  - بناء APKين عبر `build-both-apps.yml` كان في قائمة الانتظار؛ لم تُرفع artifacts بعد.
+- Worker:
+  - تم تصحيح إصدار `@cloudflare/workers-types` إلى إصدار منشور `5.20261127.1`.
+  - تم إصلاح provisioning في workflow ليستخدم Cloudflare D1 REST API بدلاً من خيار Wrangler غير المدعوم في الإصدار المستخدم.
+  - نجح `npm install` و`npm run typecheck`.
+  - تم إنشاء قاعدة D1 المخصصة `hamed-smart-delivery-accounts` وتطبيق migration `0001_initial_accounts.sql) بنجاح. UUID القاعدة: `d7cd499b-764c-460f-8ec9-b81b8b5d188a`.
+  - فشل نشر Worker فقط لأن الحساب لم يسجل workers.dev subdomain بعد. يلزم تسجيل النطاق من Cloudflare Workers onboarding ثم إعادة تشغيل Workflow.
+- إعداد دخول تطبيق الإدارة:
+  - اعتماد المستخدم: username `Hamed` وكلمة المرور الأولية التي قدمها المستخدم، مع تذكر الجلسة بعد أول دخول.
+  - لم تُضمّن كلمة المرور في المستودع أو APK؛ لم يتم بعد إنشاء endpoint تسجيل الدخول أو تخزين الجلسة المشفر.
+  - Admin CRUD لا يزال مقفلاً حتى اكتمال مصادقة الإدارة وإعداد Auth0 Management API وDatabase Connection.
+- لم يتم تعديل main أو قاعدة الرياض أو خدمات Render. لم يتم تسليم APK لأن البناء والتحقق ورفع artifacts لم تكتمل بعد.
