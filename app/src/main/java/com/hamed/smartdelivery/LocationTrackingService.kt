@@ -54,7 +54,7 @@ class LocationTrackingService : Service(), LocationListener {
             for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
                 if (locationManager.allProviders.contains(provider) && locationManager.isProviderEnabled(provider)) {
                     try {
-                        locationManager.requestLocationUpdates(provider, 2500L, 3f, this, Looper.getMainLooper())
+                        locationManager.requestLocationUpdates(provider, 1000L, 1f, this, Looper.getMainLooper())
                         requested = true
                     } catch (_: SecurityException) {
                         // Keep trying other providers; coarse-only permission may not allow GPS_PROVIDER.
