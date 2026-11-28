@@ -30,9 +30,15 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Other observed services include Hamed Maps services. They are explicitly outside this project's scope and must not be changed.
 - No Render resource has been modified or deployed as part of this integration.
 ### Auth0
-- User reports an Auth0 account/tenant was created.
-- Tenant domain, application/client ID, API audience, callback URLs, and credentials are not yet supplied or independently verified.
-- No Auth0 integration or configuration change has been made.
+- User created an Auth0 tenant/account.
+- Tenant domain: dev-sm0yv5i1vy4kqhz8.us.auth0.com.
+- Native Android application: Hamed Smart Delivery Android.
+- Public Client ID: rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
+- Android applicationId verified from app/build.gradle.kts: com.hamed.smartdelivery.
+- Auth0 API created by user: Hamed Smart Delivery API; Identifier/Audience: https://hamed-smart-delivery-api; Auth0 API ID: 6b0a4d86b566fe33a405f7c6.
+- User-provided API settings page shows maximum access-token lifetime 86400 seconds and implicit/hybrid lifetime 7200 seconds. The displayed page text does not establish which JWT signing algorithm is currently selected; verify that RS256 is selected before relying on it.
+- Callback/logout URLs and API permissions/RBAC policy are not yet configured or verified.
+- No client secret is needed in the Android native application; use Authorization Code + PKCE.
 ### Cloudflare
 - User reports a Cloudflare account and API token were created.
 - User reports the token is stored in GitHub repository secret CLOUDFLARE_API_TOKEN.
@@ -118,7 +124,6 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - No Cloudflare Worker or D1 resource was created or changed.
 - Next: guide the user through creating an Auth0 tenant (if not already created), then a Native Application and API; collect only the public tenant domain and API audience.
 
-
 ### 2026-11-28 — Auth0 Native Application created by user
 - User reports successful creation of Auth0 application "Hamed Smart Delivery Android" with application type Native.
 - Public Client ID supplied by user: rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
@@ -126,7 +131,6 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Tenant domain is still pending. No callback/logout URLs or API audience have been configured.
 - No Auth0 settings were changed by the assistant.
 - Next: obtain the tenant Domain from the Auth0 application Settings page; then inspect the Android package/application ID in the repository before defining callback and logout URLs. After that, agree on the API Identifier/Audience before creating the Auth0 API.
-
 
 ### 2026-11-28 — Auth0 tenant domain received; Android application ID verified
 - User supplied the Auth0 tenant domain: dev-sm0yv5i1vy4kqhz8.us.auth0.com.
@@ -136,3 +140,13 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - No callback/logout URLs have been set yet; they must be derived from the verified applicationId and chosen Auth0 Android callback scheme, then tested.
 - No Auth0 API/Audience has been created yet. No Cloudflare or Render resources changed.
 - Next: create a dedicated Auth0 API with a carefully chosen Identifier/Audience. This Identifier is a durable API identity and should be confirmed before saving; then configure Android callback/logout URLs using com.hamed.smartdelivery and the Auth0 Android SDK convention.
+
+### 2026-11-28 — Auth0 API created by user
+- User confirmed the API creation by sharing its Auth0 dashboard details page.
+- API name: Hamed Smart Delivery API.
+- API Identifier/Audience: https://hamed-smart-delivery-api.
+- Auth0 API ID: 6b0a4d86b566fe33a405f7c6.
+- The page shows maximum access-token lifetime 86400 seconds and implicit/hybrid lifetime 7200 seconds.
+- The shared page text does not expose the currently selected JWT signing algorithm; RS256 selection remains to be verified in the dashboard.
+- No API secret or token was requested or recorded. No other API settings were changed by the assistant.
+- Next: verify RS256 selection, then review Auth0's current Android SDK guidance before setting callback/logout URLs for applicationId com.hamed.smartdelivery. Do not enable paid add-ons or change unrelated API settings.
