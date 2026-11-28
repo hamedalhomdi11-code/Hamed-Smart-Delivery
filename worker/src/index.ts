@@ -128,6 +128,8 @@ async function adminLogin(request: Request, env: Env): Promise<Response> {
   const username = typeof body?.username === "string" ? body.username.trim() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   if (!username || !password || username.length > 80 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
+  const bootstrapRow = await env.DB.prepare("SELECT id FROM admin_credentials WHERE id = 1").first<{ id: number }>();
+  if (!bootstrapRow && !env.ADMIN_INITIAL_PASSWORD) return json({ error: "admin_bootstrap_secret_not_configured" }, 503);
   const ipHash = await sha256(request.headers.get("CF-Connecting-IP") ?? "unknown-client");
   const now = Date.now();
   const attempts = await env.DB.prepare("SELECT failures, window_started_ms, blocked_until_ms FROM admin_login_attempts WHERE ip_hash = ?")
@@ -163,7 +165,9 @@ async function requireAdmin(request: Request, env: Env): Promise<AdminIdentity |
     "SELECT username, expires_at_ms FROM admin_sessions WHERE token_hash = ? LIMIT 1",
   ).bind(tokenHash).first<{ username: string; expires_at_ms: number }>();
   if (!session || session.expires_at_ms <= Date.now()) return json({ error: "admin_session_expired" }, 401);
-  await env.DB.prepare("UPDATE admin_sessions SET last_seen_at_ms = ? WHERE token_hash = ?").bind(Date.now(), tokenHash).run();
+  const now = Date.now();
+  await env.DB.prepare("UPDATE admin_sessions SET last_seen_at_ms = ?, expires_at_ms = ? WHERE token_hash = ?")
+    .bind(now, now + 90 * 86400000, tokenHash).run();
   return { username: session.username, tokenHash };
 }
 async function revokeAdmin(request: Request, env: Env): Promise<Response> {
