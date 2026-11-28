@@ -27,5 +27,12 @@ RUN set -e; \
     APK_SHA256=$(sha256sum "$APK" | cut -d' ' -f1); \
     printf '{"versionName":"0.4.3","versionCode":8,"variant":"debug","apkSizeBytes":%s,"apkSha256":"%s","riyadhDatabaseAsset":"verified","signature":"verified"}\n' "$APK_SIZE" "$APK_SHA256" > /srv/apk-build-report.json; \
     cat /srv/apk-build-report.json
+# Keep the Android SDK, Gradle, Overture tooling and build datasets out of the runtime image.
+# The free Render web service only needs the APK and the tiny standard-library download server.
+FROM python:3.12-slim AS runtime
+WORKDIR /workspace
+COPY --from=builder /srv /srv
+COPY scripts/serve_apk.py /workspace/scripts/serve_apk.py
+ENV PORT=10000
 EXPOSE 10000
 CMD ["python3", "/workspace/scripts/serve_apk.py"]
