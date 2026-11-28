@@ -337,14 +337,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (hasLocationPermission) {
             ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
-            if (pendingSearchAfterPermission) {
-                val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.StartSearch)
-                if (transition.accepted) {
-                    driverSnapshot = transition.snapshot
-                    searchRequestId += 1
-                }
-                pendingSearchAfterPermission = false
-            }
+
         } else {
             pendingSearchAfterPermission = false
         }
@@ -355,6 +348,29 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.POST_NOTIFICATIONS
         ))
+    }
+    // Do not mark the driver as searching until the foreground GPS service confirms it is active.
+    LaunchedEffect(pendingSearchAfterPermission, gpsMode) {
+        if (pendingSearchAfterPermission) {
+            if (gpsMode == GpsMode.TRACKING) {
+                val transition = DriverReducer.reduce(driverSnapshot, DriverCommand.StartSearch)
+                if (transition.accepted) {
+                    driverSnapshot = transition.snapshot
+                    searchRequestId += 1
+                }
+                pendingSearchAfterPermission = false
+            } else {
+                delay(15_000L)
+                if (pendingSearchAfterPermission && gpsMode == GpsMode.STOPPED) {
+                    pendingSearchAfterPermission = false
+                    android.widget.Toast.makeText(
+                        context,
+                        "لم تبدأ خدمة GPS. تحقق من تفعيل الموقع ومنح صلاحياته ثم حاول مجدداً.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
     LaunchedEffect(Unit) {
         if (!hasLocationPermission) {
@@ -448,14 +464,30 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                         searchRequestId += 1
                         announceArabic("تم استبعاد التجمع السابق لمدة عشر دقائق. يجري البحث عن التجمع التالي")
                     } }, onResetExclusions = { excludedClusters = emptyMap(); if (driverSnapshot.mode == DriverMode.SEARCHING) searchRequestId += 1 }) { command ->
+                        val waitingForGps = command == DriverCommand.StartSearch &&
+                            (!hasLocationPermission || gpsMode == GpsMode.STOPPED)
                         if (command == DriverCommand.StartSearch && !hasLocationPermission) {
                             pendingSearchAfterPermission = true
                             requestLocationPermissions()
                         } else if (command == DriverCommand.StartSearch && gpsMode == GpsMode.STOPPED) {
-                            ContextCompat.startForegroundService(context, Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START))
+                            pendingSearchAfterPermission = true
+                            try {
+                                ContextCompat.startForegroundService(
+                                    context,
+                                    Intent(context, LocationTrackingService::class.java).setAction(LocationTrackingService.ACTION_START)
+                                )
+                            } catch (error: Exception) {
+                                pendingSearchAfterPermission = false
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "تعذر تشغيل خدمة GPS: ${error.localizedMessage ?: error.javaClass.simpleName}",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }
-                        val transition = DriverReducer.reduce(driverSnapshot, command)
-                        if (transition.accepted) {
+                        if (!waitingForGps) {
+                            val transition = DriverReducer.reduce(driverSnapshot, command)
+                            if (transition.accepted) {
                             when (command) {
                                 DriverCommand.OrderReceived -> {
                                     clusterWaitStartedAt = null
@@ -473,6 +505,7 @@ fun HamedApp(initialDestination: DeliveryDestination? = null) {
                             }
                             driverSnapshot = transition.snapshot
                             if (command == DriverCommand.StartSearch && hasLocationPermission) searchRequestId += 1
+                            }
                         }
                     }
                 } else {
