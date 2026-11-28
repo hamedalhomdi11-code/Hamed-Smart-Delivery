@@ -83,11 +83,11 @@ object RouteDeviationPolicy {
     const val REQUIRED_CONSECUTIVE_FIXES = 2
     const val REROUTE_COOLDOWN_MILLIS = 5_000L
 
-    fun shouldReroute(match: RouteMatch?, location: Location): Boolean {
+    fun shouldReroute(match: RouteMatch?, speedMetersPerSecond: Double, accuracyMeters: Double? = null): Boolean {
         if (match == null || !match.crossTrackMeters.isFinite()) return false
         if (match.crossTrackMeters <= MIN_CROSS_TRACK_METERS) return false
-        if (!location.speed.isFinite() || location.speed < MIN_SPEED_METERS_PER_SECOND) return false
-        return !location.hasAccuracy() || location.accuracy <= MAX_ACCEPTED_ACCURACY_METERS
+        if (!speedMetersPerSecond.isFinite() || speedMetersPerSecond < MIN_SPEED_METERS_PER_SECOND) return false
+        return accuracyMeters == null || !accuracyMeters.isFinite() || accuracyMeters <= MAX_ACCEPTED_ACCURACY_METERS
     }
 }
 
