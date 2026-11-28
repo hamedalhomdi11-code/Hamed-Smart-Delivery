@@ -30,7 +30,7 @@ class GpsMotionFilter {
         val accuracy = if (raw.hasAccuracy()) raw.accuracy.coerceAtLeast(3f) else 35f
         val reportedSpeed = if (raw.hasSpeed() && raw.speed.isFinite()) raw.speed.coerceAtLeast(0f) else 0f
         val plausibleSpeed = max(42.0, reportedSpeed.toDouble() + 18.0)
-        val jumpAllowance = max(accuracy * 2.5, 25f).toDouble()
+        val jumpAllowance = max(accuracy.toDouble() * 2.5, 25.0)
         if (dt < 20.0 && measuredDistance > plausibleSpeed * dt + jumpAllowance) {
             return null
         }
