@@ -126,3 +126,13 @@ Define a safe, auditable operating model connecting the user's ChatGPT work with
 - Tenant domain is still pending. No callback/logout URLs or API audience have been configured.
 - No Auth0 settings were changed by the assistant.
 - Next: obtain the tenant Domain from the Auth0 application Settings page; then inspect the Android package/application ID in the repository before defining callback and logout URLs. After that, agree on the API Identifier/Audience before creating the Auth0 API.
+
+
+### 2026-11-28 — Auth0 tenant domain received; Android application ID verified
+- User supplied the Auth0 tenant domain: dev-sm0yv5i1vy4kqhz8.us.auth0.com.
+- User confirmed the Native application Client ID was previously supplied: rfttwF5wZW5RKdsaLkWSnvXuwlNyuwXD.
+- Inspected app/build.gradle.kts on GitHub main (read-only). Android namespace and applicationId are both com.hamed.smartdelivery; minSdk 26, targetSdk 35.
+- Auth0 application remains Native. No Client Secret was copied, requested, or recorded.
+- No callback/logout URLs have been set yet; they must be derived from the verified applicationId and chosen Auth0 Android callback scheme, then tested.
+- No Auth0 API/Audience has been created yet. No Cloudflare or Render resources changed.
+- Next: create a dedicated Auth0 API with a carefully chosen Identifier/Audience. This Identifier is a durable API identity and should be confirmed before saving; then configure Android callback/logout URLs using com.hamed.smartdelivery and the Auth0 Android SDK convention.
