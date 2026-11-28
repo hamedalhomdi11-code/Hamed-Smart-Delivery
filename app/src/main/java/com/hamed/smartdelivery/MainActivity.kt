@@ -1044,16 +1044,13 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                             }
                             if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination &&
                                 route != null && route.points.size > 1) {
-                                displayedRoutePolyline?.let { map.removePolyline(it) }
-                                displayedRoutePolyline = map.addPolyline(
-                                    PolylineOptions().addAll(route.points)
-                                        .color(AndroidColor.rgb(13, 71, 161))
-                                        .width(7f)
-                                )
+                                monotonicRouteProgress = 0.0
+                                lastProgressDrawn = -2.0
                                 routePoints = route.points
+                                drawRouteProgress(route.points, 0.0)
                                 routeSteps = route.steps
                                 spokenRouteStepIndex = 0
-                                routeStatus = "تم رسم المسار • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د"
+                                routeStatus = "مسار سيارة متوازن • " + (route.distanceMeters / 1000.0).toInt() + " كم • " + (route.durationSeconds / 60.0).toInt() + " د • وقود تقديري " + String.format(Locale.US, "%.1f", route.estimatedFuelLiters) + " ل • لا تتوفر بيانات ازدحام/إغلاق حية"
                             } else if (isActive && routeRequestId == searchRequestId && activeDestination == pendingDestination) {
                                 routeRequested = false
                                 routeStatus = "تعذر حساب المسار حالياً • ستتم إعادة المحاولة"
