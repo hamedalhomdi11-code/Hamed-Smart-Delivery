@@ -665,7 +665,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
             mapLibreMap = map
             map.setStyle("https://tiles.openfreemap.org/styles/liberty") {
                 // Offset the camera's usable center upward so the driver arrow sits lower on screen.
-                map.setPadding(0, (mapView.height * 0.27f).roundToInt().coerceAtLeast(0), 0, 0)
+                map.setPadding(0, (mapView.height * 0.38f).roundToInt().coerceAtLeast(0), 0, 0)
                 map.uiSettings.isAttributionEnabled = true
                 map.uiSettings.isLogoEnabled = true
                 map.cameraPosition = CameraPosition.Builder()
@@ -765,7 +765,7 @@ private fun SmartMap(hasLocationPermission: Boolean, destination: DeliveryDestin
                     latestUserLocation = Location(location)
                     // A manual pan pauses follow only temporarily; resume it automatically on movement.
                     val distanceSinceCameraFix = lastCameraLocation?.distanceTo(location) ?: 0f
-                    if ((location.hasSpeed() && location.speed >= 1.2f) || distanceSinceCameraFix >= 4f) {
+                    if (location.speed >= 1.2f || distanceSinceCameraFix >= 4f) {
                         followUserCamera = true
                     }
                     val clusterAtLocation = currentCluster
