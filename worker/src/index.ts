@@ -249,7 +249,7 @@ async function listDrivers(env: Env): Promise<Response> {
 }
 async function createDriver(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
-  const username = typeof body?.username === "string" ? body.username.trim() : "";
+  const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   const durationValue = Number(body?.durationValue);
   const durationUnit = typeof body?.durationUnit === "string" ? body.durationUnit : "";
