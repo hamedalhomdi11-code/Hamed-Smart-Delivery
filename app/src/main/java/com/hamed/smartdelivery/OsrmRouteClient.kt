@@ -17,17 +17,24 @@ data class RouteResult(
     val points: List<LatLng>,
     val distanceMeters: Double,
     val durationSeconds: Double,
-    val steps: List<RouteStep> = emptyList()
+    val steps: List<RouteStep> = emptyList(),
+    val estimatedFuelLiters: Double = GasolineFuelEstimator.estimate(distanceMeters, durationSeconds).liters,
+    val alternativeCount: Int = 1,
+    val routingProfile: String = "car",
+    // OSRM demo endpoints do not expose live traffic, incident or roadwork feeds.
+    val liveTrafficAvailable: Boolean = false,
+    val liveClosuresAvailable: Boolean = false
 )
 
 /**
- * Requests a driving route with turn-by-turn steps from the public OSRM demo endpoint.
- * The public demo service is best-effort for development and is not a production SLA.
+ * Car-profile route search. It evaluates OSRM's returned alternatives with a balanced
+ * time/fuel score. The public OSRM endpoints are best-effort and do not provide live
+ * traffic, accident, closure or roadwork feeds.
  */
 object OsrmRouteClient {
+    private data class Candidate(val result: RouteResult)
+
     fun fetchRoute(startLatitude: Double, startLongitude: Double, endLatitude: Double, endLongitude: Double): RouteResult? {
-        // Two independent public OSRM demo endpoints. The second is a fallback only;
-        // both are best-effort services and neither is a production SLA.
         val bases = listOf(
             "https://router.project-osrm.org/route/v1/driving/",
             "https://routing.openstreetmap.de/routed-car/route/v1/driving/"
@@ -36,67 +43,86 @@ object OsrmRouteClient {
         for (base in bases) {
             var connection: HttpURLConnection? = null
             try {
-                val endpoint = base + coordinates + "?overview=full&geometries=geojson&steps=true"
+                val endpoint = base + coordinates +
+                    "?overview=full&geometries=geojson&steps=true&alternatives=3&continue_straight=false"
                 connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 9000
-                    readTimeout = 14000
-                    setRequestProperty("User-Agent", "HamedSmartDelivery/0.4.3 (Android)")
+                    readTimeout = 16000
+                    setRequestProperty("User-Agent", "HamedSmartDelivery/0.4.3 (Android; car routing)")
                     setRequestProperty("Accept", "application/json")
                 }
                 if (connection.responseCode !in 200..299) continue
                 val body = connection.inputStream.bufferedReader().use { it.readText() }
                 val root = JSONObject(body)
                 if (root.optString("code") != "Ok") continue
-                val route = root.optJSONArray("routes")?.optJSONObject(0) ?: continue
-                val coordinatesArray = route.getJSONObject("geometry").getJSONArray("coordinates")
-                val points = buildList {
-                    for (index in 0 until coordinatesArray.length()) {
-                        val pair = coordinatesArray.getJSONArray(index)
-                        add(LatLng(pair.getDouble(1), pair.getDouble(0)))
-                    }
-                }
-                if (points.size < 2) continue
-                val steps = buildList {
-                    val legs = route.optJSONArray("legs") ?: return@buildList
-                    for (legIndex in 0 until legs.length()) {
-                        val leg = legs.optJSONObject(legIndex) ?: continue
-                        val legSteps = leg.optJSONArray("steps") ?: continue
-                        for (stepIndex in 0 until legSteps.length()) {
-                            val step = legSteps.optJSONObject(stepIndex) ?: continue
-                            val maneuver = step.optJSONObject("maneuver")
-                            val type = maneuver?.optString("type").orEmpty()
-                            val modifier = maneuver?.optString("modifier").orEmpty()
-                            val road = step.optString("name").takeIf { it.isNotBlank() }
-                            val instruction = formatInstruction(type, modifier, road)
-                            val coordinate = maneuver?.optJSONArray("location")
-                            val point = if (coordinate != null && coordinate.length() >= 2)
-                                LatLng(coordinate.getDouble(1), coordinate.getDouble(0)) else null
-                            if (instruction.isNotBlank()) add(
-                                RouteStep(
-                                    instruction,
-                                    step.optDouble("distance", 0.0),
-                                    step.optDouble("duration", 0.0),
-                                    point,
-                                    formatInstructionEnglish(type, modifier, road)
-                                )
-                            )
+                val routes = root.optJSONArray("routes") ?: continue
+                val candidates = buildList {
+                    for (index in 0 until routes.length()) {
+                        val route = routes.optJSONObject(index) ?: continue
+                        val coordinatesArray = route.optJSONObject("geometry")?.optJSONArray("coordinates") ?: continue
+                        val points = buildList {
+                            for (pointIndex in 0 until coordinatesArray.length()) {
+                                val pair = coordinatesArray.optJSONArray(pointIndex) ?: continue
+                                if (pair.length() >= 2) add(LatLng(pair.getDouble(1), pair.getDouble(0)))
+                            }
                         }
+                        if (points.size < 2) continue
+                        val distance = route.optDouble("distance", 0.0)
+                        val duration = route.optDouble("duration", 0.0)
+                        if (distance <= 0.0 || duration <= 0.0) continue
+                        add(Candidate(RouteResult(
+                            points = points,
+                            distanceMeters = distance,
+                            durationSeconds = duration,
+                            steps = parseSteps(route),
+                            estimatedFuelLiters = GasolineFuelEstimator.estimate(distance, duration).liters,
+                            alternativeCount = routes.length(),
+                            routingProfile = "car",
+                            liveTrafficAvailable = false,
+                            liveClosuresAvailable = false
+                        )))
                     }
                 }
-                return RouteResult(
-                    points = points,
-                    distanceMeters = route.optDouble("distance", 0.0),
-                    durationSeconds = route.optDouble("duration", 0.0),
-                    steps = steps
+                if (candidates.isEmpty()) continue
+                val selectedIndex = BalancedRouteScorer.chooseIndex(
+                    candidates.map { it.result.distanceMeters },
+                    candidates.map { it.result.durationSeconds }
                 )
+                return candidates[selectedIndex].result
             } catch (_: Exception) {
-                // Try the alternate router if this endpoint times out or rejects the route.
+                // Try the alternate car router if this endpoint times out or rejects the route.
             } finally {
                 connection?.disconnect()
             }
         }
         return null
+    }
+
+    private fun parseSteps(route: JSONObject): List<RouteStep> = buildList {
+        val legs = route.optJSONArray("legs") ?: return@buildList
+        for (legIndex in 0 until legs.length()) {
+            val leg = legs.optJSONObject(legIndex) ?: continue
+            val legSteps = leg.optJSONArray("steps") ?: continue
+            for (stepIndex in 0 until legSteps.length()) {
+                val step = legSteps.optJSONObject(stepIndex) ?: continue
+                val maneuver = step.optJSONObject("maneuver")
+                val type = maneuver?.optString("type").orEmpty()
+                val modifier = maneuver?.optString("modifier").orEmpty()
+                val road = step.optString("name").takeIf { it.isNotBlank() }
+                val instruction = formatInstruction(type, modifier, road)
+                val coordinate = maneuver?.optJSONArray("location")
+                val point = if (coordinate != null && coordinate.length() >= 2)
+                    LatLng(coordinate.getDouble(1), coordinate.getDouble(0)) else null
+                if (instruction.isNotBlank()) add(RouteStep(
+                    instruction,
+                    step.optDouble("distance", 0.0),
+                    step.optDouble("duration", 0.0),
+                    point,
+                    formatInstructionEnglish(type, modifier, road)
+                ))
+            }
+        }
     }
 
     private fun formatInstructionEnglish(type: String, modifier: String, road: String?): String {
