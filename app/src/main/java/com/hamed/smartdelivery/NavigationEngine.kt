@@ -72,6 +72,25 @@ data class RouteMatch(
 
 data class RouteSplit(val completed: List<LatLng>, val remaining: List<LatLng>)
 
+/**
+ * Shared off-route policy for every active route, whether the driver is searching
+ * *or* has received an order. Accuracy gating avoids rerouting on noisy GPS fixes.
+ */
+object RouteDeviationPolicy {
+    const val MIN_CROSS_TRACK_METERS = 55.0
+    const val MIN_SPEED_METERS_PER_SECOND = 2.0
+    const val MAX_ACCEPTED_ACCURACY_METERS = 65.0
+    const val REQUIRED_CONSECUTIVE_FIXES = 2
+    const val REROUTE_COOLDOWN_MILLIS = 5_000L
+
+    fun shouldReroute(match: RouteMatch?, location: Location): Boolean {
+        if (match == null || !match.crossTrackMeters.isFinite()) return false
+        if (match.crossTrackMeters <= MIN_CROSS_TRACK_METERS) return false
+        if (!location.speed.isFinite() || location.speed < MIN_SPEED_METERS_PER_SECOND) return false
+        return !location.hasAccuracy() || location.accuracy <= MAX_ACCEPTED_ACCURACY_METERS
+    }
+}
+
 /** Geometry-aware map matching and progress projection against the active route. */
 object RouteGeometryMatcher {
     private const val EARTH_RADIUS_METERS = 6371008.8
